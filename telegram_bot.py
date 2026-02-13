@@ -36,43 +36,43 @@ Your ONLY job is to return valid JSON — no commentary, no markdown fences.
 
 Today's date: {current_date}
 
+ACTIONS:
+- "add" (default): log a new entry
+- "remove": delete an existing entry. User might say "remove", "delete", "undo", "cancel", etc.
+
 CATEGORIES (pick exactly one):
 
 1. **finance** — any mention of spending, bills, subscriptions, purchases.
-   Required fields:
-   - amount: number (always positive)
-   - currency: ISO code, default "SGD"
-   - description: short label
-   - subcategory: a lowercase snake_case label for what it's about. Reuse existing labels when possible for consistency. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
-   - date: YYYY-MM-DD (infer from context; default today)
+   For action "add":
+     Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
+     subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
+   For action "remove":
+     Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
 
 2. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
-   Required fields:
-   - person: name (title case)
-   - status: "active" | "texting" | "backburner"
-     - active: currently going on dates / seeing each other
-     - texting: matched or chatting but haven't met yet
-     - backburner: low priority, not actively pursuing
-   Optional: platform (app name or "in_person"), activity, location, notes, date (YYYY-MM-DD), rating (1-5)
+   For action "add":
+     Required: person (title case), status ("active" | "texting" | "backburner")
+     Optional: platform, activity, location, notes, date (YYYY-MM-DD), rating (1-5)
+   For action "remove":
+     Required: person (the name to remove)
 
 3. **todos** — tasks, reminders, goals, deadlines.
-   Required fields:
-   - task: concise description
-   - priority: "high" | "medium" | "low" (infer from urgency cues)
-   - status: "pending" | "in_progress" | "done"
-   Optional: due (YYYY-MM-DD), tags (list of strings)
+   For action "add":
+     Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
+     Optional: due (YYYY-MM-DD), tags (list of strings)
 
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - All dates must be YYYY-MM-DD. Resolve relative dates (e.g. "Friday" → next Friday).
 - If "yesterday" is mentioned, subtract 1 day from today.
-- Currency: default SGD unless another currency symbol/code is explicit.
+- Currency is always SGD — do not include a currency field.
 - confidence: float 0-1 reflecting how certain you are of the parse.
 - If the message is ambiguous or doesn't fit any category, set:
   "category": "unknown", "needs_clarification": true, "clarification_question": "<your question>"
 
 OUTPUT SCHEMA:
 {{
+  "action": "add" | "remove",
   "category": "finance" | "dating" | "todos" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
@@ -94,6 +94,13 @@ REQUIRED_FIELDS = {
     "todos": {"task", "priority", "status"},
 }
 
+# For remove actions, we only need enough to identify the entry
+REQUIRED_FIELDS_REMOVE = {
+    "finance": set(),       # any combination of amount/description/date is fine
+    "dating": {"person"},   # must know who to remove
+    "todos": set(),
+}
+
 VALID_ENUMS = {
     "dating": {
         "status": {"active", "texting", "backburner"},
@@ -108,25 +115,29 @@ VALID_ENUMS = {
 def validate_parsed(parsed: dict) -> tuple[bool, str]:
     """Validate parsed data against the schema. Returns (is_valid, error_message)."""
     category = parsed.get("category")
-    if category not in REQUIRED_FIELDS:
+    action = parsed.get("action", "add")
+
+    required_map = REQUIRED_FIELDS_REMOVE if action == "remove" else REQUIRED_FIELDS
+    if category not in required_map:
         return False, f"Unknown category: {category}"
 
     data = parsed.get("data", {})
-    missing = REQUIRED_FIELDS[category] - set(data.keys())
+    missing = required_map[category] - set(data.keys())
     if missing:
         return False, f"Missing fields for {category}: {missing}"
 
-    # Check enum values
-    for field, allowed in VALID_ENUMS.get(category, {}).items():
-        value = data.get(field)
-        if value and value not in allowed:
-            return False, f"Invalid {field}='{value}' for {category}. Allowed: {allowed}"
+    # Only validate enums for add actions
+    if action == "add":
+        for field, allowed in VALID_ENUMS.get(category, {}).items():
+            value = data.get(field)
+            if value and value not in allowed:
+                return False, f"Invalid {field}='{value}' for {category}. Allowed: {allowed}"
 
-    # Finance-specific: amount must be a positive number
-    if category == "finance":
-        amount = data.get("amount")
-        if not isinstance(amount, (int, float)) or amount <= 0:
-            return False, f"Invalid amount: {amount}"
+        # Finance-specific: amount must be a positive number
+        if category == "finance":
+            amount = data.get("amount")
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                return False, f"Invalid amount: {amount}"
 
     return True, ""
 
@@ -203,7 +214,6 @@ def _apply_defaults(parsed: dict):
     today = datetime.now().strftime("%Y-%m-%d")
 
     if parsed["category"] == "finance":
-        data.setdefault("currency", "SGD")
         data.setdefault("date", today)
 
     elif parsed["category"] == "dating":
@@ -249,6 +259,85 @@ async def save_to_supabase(category: str, data: dict, user_id: int) -> bool:
     except Exception as e:
         print(f"❌ Supabase request failed: {e}")
         return False
+
+
+async def remove_from_supabase(category: str, data: dict, user_id: int) -> dict | None:
+    """Find and delete a matching entry. Returns the deleted entry or None."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Fetch recent entries in this category to find a match
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={
+                    "user_id": f"eq.{str(user_id)}",
+                    "category": f"eq.{category}",
+                    "order": "created_at.desc",
+                    "limit": "50",
+                    "select": "id,category,data,created_at",
+                },
+            )
+
+            if resp.status_code != 200 or not resp.json():
+                return None
+
+            rows = resp.json()
+
+            # Find best matching entry
+            match = _find_best_match(category, data, rows)
+            if not match:
+                return None
+
+            # Delete it
+            del_resp = await client.delete(
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={"id": f"eq.{match['id']}"},
+            )
+
+            if del_resp.status_code in (200, 204):
+                return match
+            return None
+
+    except Exception as e:
+        print(f"❌ Supabase remove failed: {e}")
+        return None
+
+
+def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | None:
+    """Score rows against search criteria and return the best match."""
+    best_row = None
+    best_score = 0
+
+    for row in rows:
+        row_data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
+        score = 0
+
+        if category == "finance":
+            if search.get("amount") and row_data.get("amount") == search["amount"]:
+                score += 3
+            if search.get("description") and search["description"].lower() in row_data.get("description", "").lower():
+                score += 2
+            if search.get("subcategory") and row_data.get("subcategory") == search["subcategory"]:
+                score += 1
+            if search.get("date") and row_data.get("date") == search["date"]:
+                score += 1
+
+        elif category == "dating":
+            if search.get("person") and search["person"].lower() == row_data.get("person", "").lower():
+                score += 5  # Name is the primary key for dating
+
+        if score > best_score:
+            best_score = score
+            best_row = row
+
+    return best_row if best_score > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +525,7 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle any text message — parse and store."""
+    """Handle any text message — parse and store or remove."""
     user_message = update.message.text
     user_id = update.message.from_user.id
 
@@ -450,25 +539,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🤔 {question}")
         return
 
+    action = parsed.get("action", "add")
     category = parsed["category"]
     data = parsed["data"]
     confidence = parsed.get("confidence", 0)
-
-    # Low confidence warning
     low_conf = confidence < 0.7
-    
-    success = await save_to_supabase(category, data, user_id)
 
-    if success:
-        emoji_map = {"finance": "💰", "dating": "💕", "todos": "✅"}
-        emoji = emoji_map.get(category, "📝")
-        summary = _summarise_entry(category, data)
-        reply = f"{emoji} {summary}"
-        if low_conf:
-            reply += "\n\n⚠️ _I'm not fully sure about this — use /delete if it's wrong._"
-        await update.message.reply_text(reply, parse_mode="Markdown")
+    emoji_map = {"finance": "💰", "dating": "💕", "todos": "✅"}
+    emoji = emoji_map.get(category, "📝")
+
+    if action == "remove":
+        deleted = await remove_from_supabase(category, data, user_id)
+        if deleted:
+            del_data = deleted["data"] if isinstance(deleted["data"], dict) else json.loads(deleted["data"])
+            summary = _summarise_entry(category, del_data)
+            await update.message.reply_text(f"🗑️ Removed: {summary}", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Couldn't find a matching entry to remove.")
     else:
-        await update.message.reply_text("❌ Failed to save. Please try again.")
+        success = await save_to_supabase(category, data, user_id)
+        if success:
+            summary = _summarise_entry(category, data)
+            reply = f"{emoji} {summary}"
+            if low_conf:
+                reply += "\n\n⚠️ _I'm not fully sure about this — use /delete if it's wrong._"
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Failed to save. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -478,10 +575,9 @@ def _summarise_entry(category: str, data: dict) -> str:
     """Human-readable one-liner for a dashboard entry."""
     if category == "finance":
         amt = data.get("amount", 0)
-        cur = data.get("currency", "SGD")
         desc = data.get("description", "")
         subcat = data.get("subcategory", "")
-        line = f"*{cur} {amt}* — {desc}"
+        line = f"*${amt}* — {desc}"
         if subcat:
             line += f" `#{subcat}`"
         return line
