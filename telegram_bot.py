@@ -26,7 +26,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]            # e.g. https://xyz.supabase
 DATABASE_KEY = os.environ["DATABASE_KEY"]             # service-role or anon key
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
-TABLE_NAME = os.environ.get("SUPABASE_TABLE", "dashboard_entries")
+TABLE_NAME = os.environ.get("DATABASE_TABLE", "dashboard_entries")
 
 # ---------------------------------------------------------------------------
 # Parsing prompt — tightly scoped to 3 categories
@@ -38,12 +38,12 @@ Today's date: {current_date}
 
 CATEGORIES (pick exactly one):
 
-1. **finance** — any mention of spending, earning, bills, subscriptions, transfers, savings.
+1. **finance** — any mention of spending, bills, subscriptions, purchases.
    Required fields:
-   - amount: number (positive for income, negative for expenses)
+   - amount: number (always positive)
    - currency: ISO code, default "SGD"
    - description: short label
-   - subcategory: a lowercase snake_case label for what it's about. Reuse existing labels when possible for consistency. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "salary", "freelance", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
+   - subcategory: a lowercase snake_case label for what it's about. Reuse existing labels when possible for consistency. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
    - date: YYYY-MM-DD (infer from context; default today)
 
 2. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
@@ -366,9 +366,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cat = row["category"]
             if cat == "finance":
                 finance_count += 1
-                amt = data.get("amount", 0)
-                if amt < 0:
-                    total_spent += abs(amt)
+                total_spent += data.get("amount", 0)
             elif cat == "dating":
                 dating_count += 1
             elif cat == "todos":
@@ -483,8 +481,7 @@ def _summarise_entry(category: str, data: dict) -> str:
         cur = data.get("currency", "SGD")
         desc = data.get("description", "")
         subcat = data.get("subcategory", "")
-        sign = "+" if amt > 0 else ""
-        line = f"*{sign}{cur} {amt}* — {desc}"
+        line = f"*{cur} {amt}* — {desc}"
         if subcat:
             line += f" `#{subcat}`"
         return line
