@@ -22,8 +22,8 @@ import httpx
 # Configuration
 # ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-DATABASE_URL = os.environ["SUPABASE_URL"]            # e.g. https://xyz.supabase.co
-DATABASE_KEY = os.environ["SUPABASE_KEY"]             # service-role or anon key
+DATABASE_URL = os.environ["DATABASE_URL"]            # e.g. https://xyz.supabase.co
+DATABASE_KEY = os.environ["DATABASE_KEY"]             # service-role or anon key
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 TABLE_NAME = os.environ.get("SUPABASE_TABLE", "dashboard_entries")
@@ -229,10 +229,10 @@ async def save_to_supabase(category: str, data: dict, user_id: int) -> bool:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}",
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
                     "Content-Type": "application/json",
                     "Prefer": "return=representation",
                 },
@@ -296,10 +296,10 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}",
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
                 },
                 params={
                     "user_id": f"eq.{user_id}",
@@ -340,10 +340,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}",
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
                 },
                 params={
                     "user_id": f"eq.{user_id}",
@@ -395,10 +395,10 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with httpx.AsyncClient(timeout=10.0) as client:
             # Fetch the latest entry's id
             resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}",
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
                 },
                 params={
                     "user_id": f"eq.{user_id}",
@@ -417,10 +417,10 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Delete it
             del_resp = await client.delete(
-                f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}",
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
                 },
                 params={"id": f"eq.{entry_id}"},
             )
