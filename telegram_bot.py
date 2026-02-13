@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import httpx
 
 # Configuration
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # Get from @BotFather
+TELEGRAM_BOT_TOKEN = "8597580638:AAH3c0u5RlPtakfv8lrsN6GRWLf77YdyhG8"  # Get from @BotFather
 DATABASE_URL = "YOUR_SUPABASE_URL"  # Or your database endpoint
 DATABASE_KEY = "YOUR_SUPABASE_KEY"
 
