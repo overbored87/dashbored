@@ -7,8 +7,9 @@ Supports 3 widgets: Finance, Dating, Todos.
 import os
 import re
 import json
-from datetime import datetime, timezone
-from telegram import Update
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+from telegram import Update, Bot
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -27,6 +28,7 @@ DATABASE_KEY = os.environ["DATABASE_KEY"]             # service-role or anon key
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 TABLE_NAME = os.environ.get("DATABASE_TABLE", "dashboard_entries")
+LOCAL_TZ = ZoneInfo("Asia/Singapore")                # SGT UTC+8
 
 # ---------------------------------------------------------------------------
 # Parsing prompt — tightly scoped to 3 categories
@@ -64,10 +66,14 @@ CATEGORIES (pick exactly one):
 4. **todos** — tasks, reminders, goals, deadlines.
    For action "add":
      Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
-     Optional: due (YYYY-MM-DD), tags (list of strings)
+     Optional: due (YYYY-MM-DD), tags (list of strings), reminder_time (ISO 8601 with timezone, e.g. "2026-02-15T15:00:00+08:00")
+   If the user says "remind me" or mentions a specific time (e.g. "at 3pm", "tomorrow morning", "tonight at 8"), ALWAYS set reminder_time.
+   Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
+   Always use timezone offset +08:00 (Singapore Time).
 
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
+- Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
 - All dates must be YYYY-MM-DD. Resolve relative dates (e.g. "Friday" → next Friday).
 - If "yesterday" is mentioned, subtract 1 day from today.
 - Currency is always SGD — do not include a currency field.
@@ -161,8 +167,14 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 async def parse_with_claude(message_text: str) -> dict:
     """Send the message to Claude for structured extraction."""
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    prompt = PARSING_PROMPT.format(current_date=current_date, message=message_text)
+    now = datetime.now(LOCAL_TZ)
+    current_date = now.strftime("%Y-%m-%d")
+    current_datetime = now.isoformat()
+    prompt = PARSING_PROMPT.format(
+        current_date=current_date,
+        current_datetime=current_datetime,
+        message=message_text,
+    )
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -624,14 +636,114 @@ def _summarise_entry(category: str, data: dict) -> str:
         task = data.get("task", "untitled task")
         priority = data.get("priority", "medium")
         due = data.get("due", "")
+        reminder = data.get("reminder_time", "")
         priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
         icon = priority_icons.get(priority, "⚪")
         line = f"{icon} {task}"
         if due:
             line += f" (due {due})"
+        if reminder:
+            try:
+                rt = datetime.fromisoformat(reminder).astimezone(LOCAL_TZ)
+                line += f"\n🔔 Reminder: {rt.strftime('%d/%m/%y %I:%M %p')}"
+            except (ValueError, TypeError):
+                pass
         return line
 
     return json.dumps(data)
+
+
+# ---------------------------------------------------------------------------
+# Reminder scheduler
+# ---------------------------------------------------------------------------
+async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """Called every 60 seconds by the job queue. Sends due reminders."""
+    now_utc = datetime.now(timezone.utc)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Fetch all pending todos that have a reminder_time
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={
+                    "category": "eq.todos",
+                    "select": "id,user_id,data",
+                },
+            )
+
+        if resp.status_code != 200:
+            print(f"⚠️ Reminder check failed: {resp.status_code}")
+            return
+
+        rows = resp.json()
+        for row in rows:
+            data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
+
+            # Skip if no reminder, already reminded, or already done
+            reminder_str = data.get("reminder_time")
+            if not reminder_str:
+                continue
+            if data.get("reminded"):
+                continue
+            if data.get("status") == "done":
+                continue
+
+            # Parse reminder time and check if it's due
+            try:
+                reminder_time = datetime.fromisoformat(reminder_str).astimezone(timezone.utc)
+            except (ValueError, TypeError):
+                continue
+
+            if reminder_time > now_utc:
+                continue
+
+            # It's due — send the reminder
+            user_id = row["user_id"]
+            task = data.get("task", "Something")
+            due = data.get("due", "")
+
+            reminder_text = (
+                f"🔔 *Reminder!*\n\n"
+                f"{task}"
+            )
+            if due:
+                reminder_text += f"\n📅 Due: {due}"
+
+            try:
+                await context.bot.send_message(
+                    chat_id=int(user_id),
+                    text=reminder_text,
+                    parse_mode="Markdown",
+                )
+                print(f"✅ Sent reminder to {user_id}: {task}")
+            except Exception as e:
+                print(f"❌ Failed to send reminder to {user_id}: {e}")
+                continue
+
+            # Mark as reminded so we don't send again
+            data["reminded"] = True
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.patch(
+                        f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                        headers={
+                            "apikey": DATABASE_KEY,
+                            "Authorization": f"Bearer {DATABASE_KEY}",
+                            "Content-Type": "application/json",
+                            "Prefer": "return=minimal",
+                        },
+                        params={"id": f"eq.{row['id']}"},
+                        json={"data": json.dumps(data)},
+                    )
+            except Exception as e:
+                print(f"⚠️ Failed to mark reminded: {e}")
+
+    except Exception as e:
+        print(f"❌ Reminder check error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +759,11 @@ def main():
     app.add_handler(CommandHandler("delete", cmd_delete))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Schedule reminder checker every 60 seconds
+    app.job_queue.run_repeating(check_reminders, interval=60, first=10)
+
     print("🤖 Dashboard bot is running...")
+    print("⏰ Reminder checker active (every 60s)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
