@@ -49,14 +49,19 @@ CATEGORIES (pick exactly one):
    For action "remove":
      Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
 
-2. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
+2. **net_worth** — account balance updates for savings or trading accounts. User might say "savings 15000", "trading acc 8500", or update both at once like "savings 15k, trading 8k".
+   Action is always "add" (each message is a new snapshot).
+   Required: at least one of savings (number) or trading (number). Include both if the user provides both.
+   Optional: date (YYYY-MM-DD, default today)
+
+3. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
    For action "add":
      Required: person (title case), status ("active" | "texting" | "backburner")
      Optional: platform, activity, location, notes, date (YYYY-MM-DD), rating (1-5)
    For action "remove":
      Required: person (the name to remove)
 
-3. **todos** — tasks, reminders, goals, deadlines.
+4. **todos** — tasks, reminders, goals, deadlines.
    For action "add":
      Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
      Optional: due (YYYY-MM-DD), tags (list of strings)
@@ -73,7 +78,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "finance" | "dating" | "todos" | "unknown",
+  "category": "finance" | "net_worth" | "dating" | "todos" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -90,6 +95,7 @@ Now parse this message:
 # ---------------------------------------------------------------------------
 REQUIRED_FIELDS = {
     "finance": {"amount", "description", "subcategory"},
+    "net_worth": set(),     # at least one of savings/trading, validated below
     "dating": {"person", "status"},
     "todos": {"task", "priority", "status"},
 }
@@ -97,6 +103,7 @@ REQUIRED_FIELDS = {
 # For remove actions, we only need enough to identify the entry
 REQUIRED_FIELDS_REMOVE = {
     "finance": set(),       # any combination of amount/description/date is fine
+    "net_worth": set(),
     "dating": {"person"},   # must know who to remove
     "todos": set(),
 }
@@ -138,6 +145,13 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
             amount = data.get("amount")
             if not isinstance(amount, (int, float)) or amount <= 0:
                 return False, f"Invalid amount: {amount}"
+
+        # Net worth: must have at least one of savings or trading
+        if category == "net_worth":
+            has_savings = isinstance(data.get("savings"), (int, float))
+            has_trading = isinstance(data.get("trading"), (int, float))
+            if not has_savings and not has_trading:
+                return False, "net_worth requires at least one of: savings, trading"
 
     return True, ""
 
@@ -214,6 +228,9 @@ def _apply_defaults(parsed: dict):
     today = datetime.now().strftime("%Y-%m-%d")
 
     if parsed["category"] == "finance":
+        data.setdefault("date", today)
+
+    elif parsed["category"] == "net_worth":
         data.setdefault("date", today)
 
     elif parsed["category"] == "dating":
@@ -408,7 +425,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"finance": "💰", "dating": "💕", "todos": "✅"}
+        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -545,7 +562,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "💰", "dating": "💕", "todos": "✅"}
+    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -581,6 +598,16 @@ def _summarise_entry(category: str, data: dict) -> str:
         if subcat:
             line += f" `#{subcat}`"
         return line
+
+    elif category == "net_worth":
+        parts = []
+        if "savings" in data:
+            parts.append(f"Savings: *${data['savings']:,.0f}*")
+        if "trading" in data:
+            parts.append(f"Trading: *${data['trading']:,.0f}*")
+        total = data.get("savings", 0) + data.get("trading", 0)
+        parts.append(f"Total: *${total:,.0f}*")
+        return " · ".join(parts)
 
     elif category == "dating":
         person = data.get("person", "someone")
