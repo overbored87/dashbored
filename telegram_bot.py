@@ -71,6 +71,15 @@ CATEGORIES (pick exactly one):
    Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
    Always use timezone offset +08:00 (Singapore Time).
 
+5. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
+   Action is always "add" (each message logs one occurrence).
+   Required: habit ("apps" | "vlogs" | "pm")
+   Optional: date (YYYY-MM-DD, default today), notes (string)
+   Trigger examples:
+   - "coded an app", "shipped an app", "launched a new app", "built an app" → habit: "apps"
+   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
+   - "PM", "pm" → habit: "pm"
+
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
@@ -84,7 +93,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "finance" | "net_worth" | "dating" | "todos" | "unknown",
+  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -104,6 +113,7 @@ REQUIRED_FIELDS = {
     "net_worth": set(),     # at least one of savings/trading, validated below
     "dating": {"person", "status"},
     "todos": {"task", "priority", "status"},
+    "habits": {"habit"},
 }
 
 # For remove actions, we only need enough to identify the entry
@@ -112,6 +122,7 @@ REQUIRED_FIELDS_REMOVE = {
     "net_worth": set(),
     "dating": {"person"},   # must know who to remove
     "todos": set(),
+    "habits": set(),
 }
 
 VALID_ENUMS = {
@@ -121,6 +132,9 @@ VALID_ENUMS = {
     "todos": {
         "priority": {"high", "medium", "low"},
         "status": {"pending", "in_progress", "done"},
+    },
+    "habits": {
+        "habit": {"apps", "vlogs", "pm"},
     },
 }
 
@@ -251,6 +265,9 @@ def _apply_defaults(parsed: dict):
     elif parsed["category"] == "todos":
         data.setdefault("status", "pending")
         data.setdefault("tags", [])
+
+    elif parsed["category"] == "habits":
+        data.setdefault("date", today)
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +454,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
+        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -574,7 +591,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
+    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -649,6 +666,11 @@ def _summarise_entry(category: str, data: dict) -> str:
             except (ValueError, TypeError):
                 pass
         return line
+
+    elif category == "habits":
+        habit = data.get("habit", "")
+        habit_labels = {"apps": "🚀 App shipped!", "vlogs": "🎬 Vlog shot!", "pm": "🚬 PM logged"}
+        return habit_labels.get(habit, f"Habit: {habit}")
 
     return json.dumps(data)
 
