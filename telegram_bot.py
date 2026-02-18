@@ -80,6 +80,15 @@ CATEGORIES (pick exactly one):
    - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
    - "PM", "pm" → habit: "pm"
 
+6. **sleep** — daily sleep quality score with optional notes.
+   Action is always "add".
+   Required: score (number 0-10, supports decimals like 7.5)
+   Optional: date (YYYY-MM-DD, default today), notes (string — brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
+   Trigger examples:
+   - "sleep 7.5" → score: 7.5
+   - "sleep 6/10 alcohol, slept late" → score: 6, notes: "alcohol, slept late"
+   - "last night 8/10 melatonin" → score: 8, notes: "melatonin"
+
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
@@ -93,7 +102,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "unknown",
+  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "sleep" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -114,6 +123,7 @@ REQUIRED_FIELDS = {
     "dating": {"person", "status"},
     "todos": {"task", "priority", "status"},
     "habits": {"habit"},
+    "sleep": {"score"},
 }
 
 # For remove actions, we only need enough to identify the entry
@@ -123,6 +133,7 @@ REQUIRED_FIELDS_REMOVE = {
     "dating": {"person"},   # must know who to remove
     "todos": set(),
     "habits": set(),
+    "sleep": set(),
 }
 
 VALID_ENUMS = {
@@ -172,6 +183,12 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
             has_trading = isinstance(data.get("trading"), (int, float))
             if not has_savings and not has_trading:
                 return False, "net_worth requires at least one of: savings, trading"
+
+        # Sleep: score must be 0-10
+        if category == "sleep":
+            score = data.get("score")
+            if not isinstance(score, (int, float)) or score < 0 or score > 10:
+                return False, f"Invalid sleep score: {score} (must be 0-10)"
 
     return True, ""
 
@@ -267,6 +284,9 @@ def _apply_defaults(parsed: dict):
         data.setdefault("tags", [])
 
     elif parsed["category"] == "habits":
+        data.setdefault("date", today)
+
+    elif parsed["category"] == "sleep":
         data.setdefault("date", today)
 
 
@@ -454,7 +474,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁"}
+        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -591,7 +611,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁"}
+    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -671,6 +691,14 @@ def _summarise_entry(category: str, data: dict) -> str:
         habit = data.get("habit", "")
         habit_labels = {"apps": "🚀 App shipped!", "vlogs": "🎬 Vlog shot!", "pm": "🚬 PM logged"}
         return habit_labels.get(habit, f"Habit: {habit}")
+
+    elif category == "sleep":
+        score = data.get("score", 0)
+        notes = data.get("notes", "")
+        line = f"*{score}/10*"
+        if notes:
+            line += f" — {notes}"
+        return line
 
     return json.dumps(data)
 
