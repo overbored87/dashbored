@@ -29,6 +29,44 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 TABLE_NAME = os.environ.get("DATABASE_TABLE", "dashboard_entries")
 LOCAL_TZ = ZoneInfo("Asia/Singapore")                # SGT UTC+8
+WIKI_TABLE = "wiki_pages"
+
+# ---------------------------------------------------------------------------
+# Wiki parsing prompt
+# ---------------------------------------------------------------------------
+WIKI_PROMPT = """You are a wiki operation parser. Given a user message about their personal wiki, extract the operation.
+
+OPERATIONS:
+1. **create** — Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
+   Required: title (string), content (markdown string)
+   
+2. **update** — Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
+   Required: title (string — the existing page to update), content (new full content OR content to append)
+   Optional: append (boolean, default false — if true, append content to existing page instead of replacing)
+
+3. **delete** — Delete a page. User might say "wiki delete X", "wiki remove X"
+   Required: title (string)
+
+RULES:
+- Return ONLY a valid JSON object.
+- title should be in Title Case.
+- content should be well-formatted markdown.
+- If the user says "add to" or "append to" an existing page, set append: true.
+- If ambiguous, set needs_clarification: true.
+
+OUTPUT SCHEMA:
+{{
+  "operation": "create" | "update" | "delete",
+  "title": "Page Title",
+  "content": "markdown content...",
+  "append": false,
+  "needs_clarification": false,
+  "clarification_question": null
+}}
+
+Now parse this message:
+\"\"\"{message}\"\"\"
+"""
 
 # ---------------------------------------------------------------------------
 # Parsing prompt — tightly scoped to 3 categories
@@ -595,6 +633,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     user_id = update.message.from_user.id
 
+    # Check for wiki commands first
+    if re.search(r'\bwiki\b', user_message, re.IGNORECASE):
+        await handle_wiki(update, user_message, user_id)
+        return
+
     await update.message.chat.send_action("typing")
 
     parsed = await parse_with_claude(user_message)
@@ -701,6 +744,302 @@ def _summarise_entry(category: str, data: dict) -> str:
         return line
 
     return json.dumps(data)
+
+
+# ---------------------------------------------------------------------------
+# Wiki system
+# ---------------------------------------------------------------------------
+def _slugify(title: str) -> str:
+    """Convert title to URL-friendly slug."""
+    slug = title.lower().strip()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r'[\s-]+', '-', slug)
+    return slug
+
+
+async def _wiki_parse(message_text: str) -> dict:
+    """Parse a wiki command via Claude."""
+    prompt = WIKI_PROMPT.format(message=message_text)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+        body = resp.json()
+        text = body["content"][0]["text"].strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        return json.loads(text)
+    except Exception as e:
+        print(f"❌ Wiki parse error: {e}")
+        return {"needs_clarification": True, "clarification_question": "Sorry, I couldn't understand that wiki command."}
+
+
+async def _wiki_get_all_pages(user_id: int) -> list:
+    """Fetch all wiki pages for a user."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
+                params={"user_id": f"eq.{user_id}", "select": "id,title,slug,content"},
+            )
+        return resp.json() if resp.status_code == 200 else []
+    except Exception as e:
+        print(f"❌ Wiki fetch error: {e}")
+        return []
+
+
+async def _wiki_get_page(user_id: int, slug: str) -> dict | None:
+    """Fetch a single wiki page by slug."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
+                params={"user_id": f"eq.{user_id}", "slug": f"eq.{slug}", "select": "*"},
+            )
+        rows = resp.json() if resp.status_code == 200 else []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
+def _render_links(content: str, all_pages: list, current_slug: str) -> str:
+    """Auto-link page titles in content. Longest match first. Avoids self-links,
+    code blocks, inline code, and existing markdown links."""
+    if not all_pages or not content:
+        return content
+
+    # Sort titles by length descending (longest match first)
+    titles = sorted(
+        [(p["title"], p["slug"]) for p in all_pages if p["slug"] != current_slug],
+        key=lambda t: len(t[0]),
+        reverse=True,
+    )
+    if not titles:
+        return content
+
+    # Split content into protected and unprotected segments
+    # Protected: code blocks, inline code, existing links
+    protected_pattern = re.compile(
+        r'(```[\s\S]*?```'       # fenced code blocks
+        r'|`[^`]+`'              # inline code
+        r'|\[([^\]]*)\]\([^)]*\)'  # markdown links
+        r')',
+        re.MULTILINE
+    )
+
+    parts = []
+    last_end = 0
+    for match in protected_pattern.finditer(content):
+        # Process unprotected text before this match
+        if match.start() > last_end:
+            parts.append(("text", content[last_end:match.start()]))
+        parts.append(("protected", match.group(0)))
+        last_end = match.end()
+    # Remaining text
+    if last_end < len(content):
+        parts.append(("text", content[last_end:]))
+
+    # Replace titles in unprotected text segments
+    result = []
+    for kind, segment in parts:
+        if kind == "protected":
+            result.append(segment)
+        else:
+            for title, slug in titles:
+                # Word boundary match, case-insensitive
+                pattern = re.compile(r'(?<!\w)(' + re.escape(title) + r')(?!\w)', re.IGNORECASE)
+                segment = pattern.sub(f'[\\1](/wiki/{slug})', segment)
+            result.append(segment)
+
+    return "".join(result)
+
+
+async def _wiki_render_all(user_id: int):
+    """Re-render all pages with cross-links."""
+    pages = await _wiki_get_all_pages(user_id)
+    if not pages:
+        return
+
+    for page in pages:
+        rendered = _render_links(page["content"], pages, page["slug"])
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.patch(
+                    f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                    headers={
+                        "apikey": DATABASE_KEY,
+                        "Authorization": f"Bearer {DATABASE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    params={"id": f"eq.{page['id']}"},
+                    json={"content_rendered": rendered, "updated_at": datetime.now(timezone.utc).isoformat()},
+                )
+        except Exception as e:
+            print(f"⚠️ Wiki render error for {page['title']}: {e}")
+
+
+async def _wiki_create(user_id: int, title: str, content: str) -> bool:
+    """Create a new wiki page."""
+    slug = _slugify(title)
+    row = {
+        "user_id": user_id,
+        "title": title,
+        "slug": slug,
+        "content": content,
+        "content_rendered": content,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                json=row,
+            )
+        if resp.status_code in (200, 201):
+            await _wiki_render_all(user_id)
+            return True
+        print(f"⚠️ Wiki create failed: {resp.status_code} {resp.text}")
+        return False
+    except Exception as e:
+        print(f"❌ Wiki create error: {e}")
+        return False
+
+
+async def _wiki_update(user_id: int, title: str, content: str, append: bool = False) -> bool:
+    """Update an existing wiki page."""
+    slug = _slugify(title)
+    page = await _wiki_get_page(user_id, slug)
+    if not page:
+        return False
+
+    new_content = page["content"] + "\n\n" + content if append else content
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                params={"id": f"eq.{page['id']}"},
+                json={
+                    "content": new_content,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        if resp.status_code in (200, 204):
+            await _wiki_render_all(user_id)
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Wiki update error: {e}")
+        return False
+
+
+async def _wiki_delete(user_id: int, title: str) -> bool:
+    """Delete a wiki page."""
+    slug = _slugify(title)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={"user_id": f"eq.{user_id}", "slug": f"eq.{slug}"},
+            )
+        if resp.status_code in (200, 204):
+            await _wiki_render_all(user_id)
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Wiki delete error: {e}")
+        return False
+
+
+async def _ensure_main_page(user_id: int):
+    """Create the Main page if it doesn't exist."""
+    page = await _wiki_get_page(user_id, "main")
+    if not page:
+        await _wiki_create(user_id, "Main", "# Welcome to your Personal Wiki\n\nThis is your starting page. Edit it via Telegram!")
+
+
+async def handle_wiki(update: Update, user_message: str, user_id: int):
+    """Handle wiki-related messages."""
+    await update.message.chat.send_action("typing")
+
+    # Ensure Main page exists
+    await _ensure_main_page(user_id)
+
+    parsed = await _wiki_parse(user_message)
+
+    if parsed.get("needs_clarification"):
+        question = parsed.get("clarification_question", "Could you clarify your wiki command?")
+        await update.message.reply_text(f"🤔 {question}")
+        return
+
+    op = parsed.get("operation")
+    title = parsed.get("title", "")
+    content = parsed.get("content", "")
+    append = parsed.get("append", False)
+
+    if op == "create":
+        # Check if page already exists
+        existing = await _wiki_get_page(user_id, _slugify(title))
+        if existing:
+            await update.message.reply_text(f"⚠️ Page *{title}* already exists. Use 'wiki update' to edit it.", parse_mode="Markdown")
+            return
+        success = await _wiki_create(user_id, title, content)
+        if success:
+            await update.message.reply_text(f"📝 Created wiki page: *{title}*", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Failed to create wiki page.")
+
+    elif op == "update":
+        success = await _wiki_update(user_id, title, content, append)
+        if success:
+            action_word = "Updated" if not append else "Appended to"
+            await update.message.reply_text(f"📝 {action_word} wiki page: *{title}*", parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ Page *{title}* not found.", parse_mode="Markdown")
+
+    elif op == "delete":
+        if _slugify(title) == "main":
+            await update.message.reply_text("⚠️ Can't delete the Main page!")
+            return
+        success = await _wiki_delete(user_id, title)
+        if success:
+            await update.message.reply_text(f"🗑️ Deleted wiki page: *{title}*", parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ Page *{title}* not found.", parse_mode="Markdown")
+
+    else:
+        await update.message.reply_text("🤔 I didn't understand that wiki command. Try: wiki create/update/delete [title]")
 
 
 # ---------------------------------------------------------------------------
