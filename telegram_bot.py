@@ -628,6 +628,53 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Something went wrong.")
 
 
+async def toggle_demo_mode(update: Update, user_id: int):
+    """Toggle demo mode on/off."""
+    try:
+        # Check current state
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "category": "eq.settings",
+                    "select": "id,data",
+                },
+            )
+        rows = resp.json() if resp.status_code == 200 else []
+        settings_row = rows[0] if rows else None
+
+        if settings_row:
+            data = settings_row["data"] if isinstance(settings_row["data"], dict) else json.loads(settings_row["data"])
+            new_demo = not data.get("demo_mode", False)
+            data["demo_mode"] = new_demo
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.patch(
+                    f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
+                    headers={
+                        "apikey": DATABASE_KEY,
+                        "Authorization": f"Bearer {DATABASE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    params={"id": f"eq.{settings_row['id']}"},
+                    json={"data": json.dumps(data)},
+                )
+        else:
+            new_demo = True
+            await save_to_supabase("settings", {"demo_mode": True}, user_id)
+
+        if new_demo:
+            await update.message.reply_text("🎭 Demo mode *ON*\nNet worth redacted · Dating hidden", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("🎭 Demo mode *OFF*\nAll data visible", parse_mode="Markdown")
+
+    except Exception as e:
+        print(f"❌ Demo toggle error: {e}")
+        await update.message.reply_text("❌ Failed to toggle demo mode.")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any text message — parse and store or remove."""
     user_message = update.message.text
@@ -636,6 +683,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check for wiki commands first
     if re.search(r'\bwiki\b', user_message, re.IGNORECASE):
         await handle_wiki(update, user_message, user_id)
+        return
+
+    # Check for demo toggle
+    if user_message.strip().lower() == 'demo':
+        await toggle_demo_mode(update, user_id)
         return
 
     await update.message.chat.send_action("typing")
