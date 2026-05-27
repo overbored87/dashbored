@@ -39,13 +39,16 @@ WIKI_PROMPT = """You are a wiki operation parser. Given a user message about the
 OPERATIONS:
 1. **create** — Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
    Required: title (string), content (markdown string)
-   
+
 2. **update** — Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
    Required: title (string — the existing page to update), content (new full content OR content to append)
    Optional: append (boolean, default false — if true, append content to existing page instead of replacing)
 
 3. **delete** — Delete a page. User might say "wiki delete X", "wiki remove X"
    Required: title (string)
+
+4. **query** — Search and answer a question from the wiki. User might say "wiki what is X", "wiki search X", "wiki tell me about X", "wiki how do I X", or any question prefixed with "wiki".
+   Required: query (string — the search term or question to answer)
 
 RULES:
 - Return ONLY a valid JSON object.
@@ -56,9 +59,10 @@ RULES:
 
 OUTPUT SCHEMA:
 {{
-  "operation": "create" | "update" | "delete",
+  "operation": "create" | "update" | "delete" | "query",
   "title": "Page Title",
   "content": "markdown content...",
+  "query": "search term or question",
   "append": false,
   "needs_clarification": false,
   "clarification_question": null
@@ -1041,6 +1045,97 @@ async def _ensure_main_page(user_id: int):
         await _wiki_create(user_id, "Main", "# Welcome to your Personal Wiki\n\nThis is your starting page. Edit it via Telegram!")
 
 
+async def _wiki_search(user_id: int, query: str) -> list[dict]:
+    """Search wiki_pages by title and content using Supabase full-text search."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Search by title first
+            title_resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "title": f"ilike.%{query}%",
+                    "select": "title,slug,content",
+                    "limit": "3",
+                },
+            )
+            # Search by content
+            content_resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                },
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "content": f"ilike.%{query}%",
+                    "select": "title,slug,content",
+                    "limit": "3",
+                },
+            )
+
+        results = []
+        seen_slugs = set()
+        for row in (title_resp.json() if title_resp.status_code == 200 else []) + \
+                    (content_resp.json() if content_resp.status_code == 200 else []):
+            if row["slug"] not in seen_slugs:
+                results.append(row)
+                seen_slugs.add(row["slug"])
+
+        return results[:5]  # cap at 5 pages
+
+    except Exception as e:
+        print(f"❌ Wiki search error: {e}")
+        return []
+
+
+async def _wiki_answer(query: str, pages: list[dict]) -> str:
+    """Use Claude to answer a question based on matched wiki pages."""
+    if not pages:
+        return None
+
+    context = "\n\n---\n\n".join(
+        f"# {p['title']}\n{p['content']}" for p in pages
+    )
+
+    prompt = f"""You are a personal knowledge assistant. Answer the user's question using ONLY the wiki pages provided below.
+Be concise and direct. If the pages don't contain enough information to answer, say so clearly.
+Do not make up information. Reference page titles where relevant.
+
+WIKI PAGES:
+{context}
+
+USER QUESTION: {query}
+
+Answer:"""
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+        if resp.status_code == 200:
+            return resp.json()["content"][0]["text"].strip()
+        return None
+    except Exception as e:
+        print(f"❌ Wiki answer error: {e}")
+        return None
+
+
 async def handle_wiki(update: Update, user_message: str, user_id: int):
     """Handle wiki-related messages."""
     await update.message.chat.send_action("typing")
@@ -1090,8 +1185,24 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
         else:
             await update.message.reply_text(f"❌ Page *{title}* not found.", parse_mode="Markdown")
 
+    elif op == "query":
+        query = parsed.get("query", user_message)
+        pages = await _wiki_search(user_id, query)
+        if not pages:
+            await update.message.reply_text("🔍 No wiki pages found for that query.")
+            return
+        answer = await _wiki_answer(query, pages)
+        if answer:
+            sources = ", ".join(f"*{p['title']}*" for p in pages)
+            await update.message.reply_text(
+                f"{answer}\n\n📖 Sources: {sources}",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("❌ Couldn't generate an answer. Try rephrasing.")
+
     else:
-        await update.message.reply_text("🤔 I didn't understand that wiki command. Try: wiki create/update/delete [title]")
+        await update.message.reply_text("🤔 I didn't understand that wiki command. Try: wiki create/update/delete/search [title or question]")
 
 
 # ---------------------------------------------------------------------------
