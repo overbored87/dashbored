@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Log It</title>
+  <link rel="manifest" href="voice-manifest.json">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Log It">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    #settings-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: none;
+      border: none;
+      color: #444;
+      font-size: 22px;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      transition: color 0.2s;
+    }
+    #settings-btn:hover { color: #888; }
+
+    #main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 40px;
+      width: 100%;
+      padding: 0 32px;
+    }
+
+    #status-label {
+      font-size: 14px;
+      color: #555;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      min-height: 18px;
+      transition: color 0.3s;
+    }
+    #status-label.listening { color: #fff; }
+    #status-label.processing { color: #888; }
+    #status-label.success { color: #4ade80; }
+    #status-label.error { color: #f87171; }
+    #status-label.clarify { color: #facc15; }
+
+    #mic-btn {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      border: none;
+      background: #1a1a1a;
+      color: #fff;
+      font-size: 52px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.1s, box-shadow 0.3s;
+      box-shadow: 0 0 0 0 rgba(255,255,255,0);
+      position: relative;
+      flex-shrink: 0;
+    }
+    #mic-btn:active { transform: scale(0.95); }
+    #mic-btn.idle { background: #1a1a1a; }
+    #mic-btn.listening {
+      background: #fff;
+      color: #0a0a0a;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    #mic-btn.processing {
+      background: #1a1a1a;
+      color: #555;
+      cursor: default;
+    }
+    #mic-btn.success { background: #14532d; color: #4ade80; }
+    #mic-btn.error { background: #450a0a; color: #f87171; }
+    #mic-btn.clarify { background: #422006; color: #facc15; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.3); }
+      50% { box-shadow: 0 0 0 24px rgba(255,255,255,0); }
+    }
+
+    #transcript {
+      font-size: 18px;
+      color: #ccc;
+      text-align: center;
+      min-height: 54px;
+      max-width: 320px;
+      line-height: 1.5;
+      transition: opacity 0.3s;
+    }
+    #transcript.dim { opacity: 0.3; }
+
+    #result {
+      font-size: 15px;
+      color: #888;
+      text-align: center;
+      min-height: 40px;
+      max-width: 300px;
+      line-height: 1.6;
+    }
+    #result.success { color: #4ade80; }
+    #result.error { color: #f87171; }
+    #result.clarify { color: #facc15; }
+
+    /* Settings panel */
+    #settings-panel {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #0a0a0a;
+      z-index: 100;
+      flex-direction: column;
+      padding: 24px;
+      overflow-y: auto;
+    }
+    #settings-panel.open { display: flex; }
+
+    #settings-panel h2 {
+      font-size: 20px;
+      margin-bottom: 28px;
+      color: #fff;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+    .field label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .field input {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus { border-color: #555; }
+
+    .field .hint {
+      font-size: 11px;
+      color: #444;
+    }
+
+    #save-btn {
+      margin-top: 8px;
+      background: #fff;
+      color: #0a0a0a;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    #save-btn:hover { background: #ddd; }
+
+    #close-settings {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: none;
+      border: none;
+      color: #555;
+      font-size: 28px;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .setup-notice {
+      background: #1a1100;
+      border: 1px solid #3a2800;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 13px;
+      color: #facc15;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<button id="settings-btn" title="Settings">⚙️</button>
+
+<div id="main">
+  <div id="status-label">tap to speak</div>
+  <button id="mic-btn" class="idle">🎙️</button>
+  <div id="transcript"></div>
+  <div id="result"></div>
+</div>
+
+<!-- Settings panel -->
+<div id="settings-panel">
+  <button id="close-settings">✕</button>
+  <h2>Settings</h2>
+  <div id="setup-notice" class="setup-notice" style="display:none">
+    Configure your keys to get started. These are stored only in your browser.
+  </div>
+  <div class="field">
+    <label>Anthropic API Key</label>
+    <input type="password" id="cfg-anthropic" placeholder="sk-ant-…">
+  </div>
+  <div class="field">
+    <label>Supabase URL</label>
+    <input type="text" id="cfg-db-url" placeholder="https://xyz.supabase.co">
+  </div>
+  <div class="field">
+    <label>Supabase Key</label>
+    <input type="password" id="cfg-db-key" placeholder="eyJ…">
+  </div>
+  <div class="field">
+    <label>User ID</label>
+    <input type="text" id="cfg-user-id" placeholder="e.g. 123456789">
+    <span class="hint">Must match the user_id your bot uses for Supabase entries. Find it by sending any message to your bot and checking the server logs, or message @userinfobot on Telegram.</span>
+  </div>
+  <button id="save-btn">Save</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Config — stored in localStorage
+// ---------------------------------------------------------------------------
+const CFG_KEY = 'logit_config';
+
+function loadConfig() {
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function saveConfig(cfg) {
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+}
+
+function isConfigured(cfg) {
+  return cfg.anthropicKey && cfg.dbUrl && cfg.dbKey && cfg.userId;
+}
+
+// ---------------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------------
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const closeSettings = document.getElementById('close-settings');
+const saveBtn = document.getElementById('save-btn');
+const setupNotice = document.getElementById('setup-notice');
+
+function openSettings() {
+  const cfg = loadConfig();
+  document.getElementById('cfg-anthropic').value = cfg.anthropicKey || '';
+  document.getElementById('cfg-db-url').value = cfg.dbUrl || '';
+  document.getElementById('cfg-db-key').value = cfg.dbKey || '';
+  document.getElementById('cfg-user-id').value = cfg.userId || '';
+  if (!isConfigured(cfg)) setupNotice.style.display = 'block';
+  else setupNotice.style.display = 'none';
+  settingsPanel.classList.add('open');
+}
+
+settingsBtn.addEventListener('click', openSettings);
+closeSettings.addEventListener('click', () => settingsPanel.classList.remove('open'));
+
+saveBtn.addEventListener('click', () => {
+  const cfg = {
+    anthropicKey: document.getElementById('cfg-anthropic').value.trim(),
+    dbUrl: document.getElementById('cfg-db-url').value.trim().replace(/\/$/, ''),
+    dbKey: document.getElementById('cfg-db-key').value.trim(),
+    userId: document.getElementById('cfg-user-id').value.trim(),
+  };
+  saveConfig(cfg);
+  settingsPanel.classList.remove('open');
+  setState('idle');
+});
+
+// ---------------------------------------------------------------------------
+// UI state machine
+// ---------------------------------------------------------------------------
+const micBtn = document.getElementById('mic-btn');
+const statusLabel = document.getElementById('status-label');
+const transcriptEl = document.getElementById('transcript');
+const resultEl = document.getElementById('result');
+
+const STATES = {
+  idle:       { label: 'tap to speak',  icon: '🎙️', btnClass: 'idle',       statusClass: '' },
+  listening:  { label: 'listening…',    icon: '⏹️', btnClass: 'listening',  statusClass: 'listening' },
+  processing: { label: 'thinking…',     icon: '⏳', btnClass: 'processing', statusClass: 'processing' },
+  success:    { label: 'logged ✓',      icon: '✓',  btnClass: 'success',    statusClass: 'success' },
+  error:      { label: 'try again',     icon: '✕',  btnClass: 'error',      statusClass: 'error' },
+  clarify:    { label: 'needs info',    icon: '?',  btnClass: 'clarify',    statusClass: 'clarify' },
+};
+
+let currentState = 'idle';
+
+function setState(name, opts = {}) {
+  currentState = name;
+  const s = STATES[name];
+  micBtn.textContent = s.icon;
+  micBtn.className = s.btnClass;
+  statusLabel.textContent = opts.label || s.label;
+  statusLabel.className = s.statusClass;
+  if (opts.transcript !== undefined) transcriptEl.textContent = opts.transcript;
+  if (opts.result !== undefined) {
+    resultEl.textContent = opts.result;
+    resultEl.className = s.statusClass;
+  }
+  micBtn.disabled = name === 'processing';
+}
+
+// Reset to idle after success/error/clarify
+let resetTimer = null;
+function scheduleReset(ms = 4000) {
+  clearTimeout(resetTimer);
+  resetTimer = setTimeout(() => setState('idle', { transcript: '', result: '' }), ms);
+}
+
+// ---------------------------------------------------------------------------
+// Claude parsing prompt (mirrors the bot exactly)
+// ---------------------------------------------------------------------------
+function buildPrompt(message) {
+  const now = new Date();
+  const sgOffset = 8 * 60;
+  const sgTime = new Date(now.getTime() + (sgOffset - now.getTimezoneOffset()) * 60000);
+  const currentDate = sgTime.toISOString().slice(0, 10);
+  const currentDatetime = sgTime.toISOString().replace('Z', '+08:00');
+
+  return `You are a structured-data extraction engine for a personal dashboard.
+Your ONLY job is to return valid JSON — no commentary, no markdown fences.
+
+Today's date: ${currentDate}
+
+ACTIONS:
+- "add" (default): log a new entry
+- "remove": delete an existing entry. User might say "remove", "delete", "undo", "cancel", etc.
+
+CATEGORIES (pick exactly one):
+
+1. **finance** — any mention of spending, bills, subscriptions, purchases.
+   For action "add":
+     Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
+     subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
+   For action "remove":
+     Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
+
+2. **net_worth** — account balance updates for savings or trading accounts. User might say "savings 15000", "trading acc 8500", or update both at once like "savings 15k, trading 8k".
+   Action is always "add" (each message is a new snapshot).
+   Required: at least one of savings (number) or trading (number). Include both if the user provides both.
+   Optional: date (YYYY-MM-DD, default today)
+
+3. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
+   For action "add":
+     Required: person (title case), status ("active" | "texting" | "backburner")
+     Optional: platform, activity, location, notes, date (YYYY-MM-DD), rating (1-5)
+   For action "remove":
+     Required: person (the name to remove)
+
+4. **todos** — tasks, reminders, goals, deadlines.
+   For action "add":
+     Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
+     Optional: due (YYYY-MM-DD), tags (list of strings), reminder_time (ISO 8601 with timezone, e.g. "2026-02-15T15:00:00+08:00")
+   If the user says "remind me" or mentions a specific time, ALWAYS set reminder_time.
+   Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
+   Always use timezone offset +08:00 (Singapore Time).
+
+5. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
+   Action is always "add".
+   Required: habit ("apps" | "vlogs" | "pm")
+   Optional: date (YYYY-MM-DD, default today), notes (string)
+   Trigger examples:
+   - "coded an app", "shipped an app", "launched a new app", "built an app" → habit: "apps"
+   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
+   - "PM", "pm" → habit: "pm"
+
+6. **sleep** — daily sleep quality score with optional notes.
+   Action is always "add".
+   Required: score (number 0-10, supports decimals like 7.5)
+   Optional: date (YYYY-MM-DD, default today), notes (string)
+   Trigger examples:
+   - "sleep 7.5" → score: 7.5
+   - "sleep 6 out of 10, drank last night" → score: 6, notes: "alcohol"
+   - "last night 8 melatonin" → score: 8, notes: "melatonin"
+
+RULES:
+- Return ONLY a single JSON object. No markdown, no explanation.
+- Current datetime: ${currentDatetime} (timezone: Asia/Singapore, UTC+8)
+- All dates must be YYYY-MM-DD. Resolve relative dates.
+- If "yesterday" is mentioned, subtract 1 day from today.
+- Currency is always SGD — do not include a currency field.
+- confidence: float 0-1 reflecting how certain you are of the parse.
+- If ambiguous or doesn't fit any category, set:
+  "category": "unknown", "needs_clarification": true, "clarification_question": "<your question>"
+
+OUTPUT SCHEMA:
+{
+  "action": "add" | "remove",
+  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "sleep" | "unknown",
+  "data": { ... },
+  "confidence": 0.0-1.0,
+  "needs_clarification": false,
+  "clarification_question": null
+}
+
+Now parse this message:
+"""${message}"""`;
+}
+
+// ---------------------------------------------------------------------------
+// Validation (mirrors the bot)
+// ---------------------------------------------------------------------------
+const REQUIRED_FIELDS = {
+  finance:   ['amount', 'description', 'subcategory'],
+  net_worth: [],
+  dating:    ['person', 'status'],
+  todos:     ['task', 'priority', 'status'],
+  habits:    ['habit'],
+  sleep:     ['score'],
+};
+
+const REQUIRED_FIELDS_REMOVE = {
+  finance: [], net_worth: [], dating: ['person'], todos: [], habits: [], sleep: [],
+};
+
+const VALID_ENUMS = {
+  dating: { status: ['active', 'texting', 'backburner'] },
+  todos:  { priority: ['high', 'medium', 'low'], status: ['pending', 'in_progress', 'done'] },
+  habits: { habit: ['apps', 'vlogs', 'pm'] },
+};
+
+function validate(parsed) {
+  const { category, action = 'add', data = {} } = parsed;
+  const req = action === 'remove' ? REQUIRED_FIELDS_REMOVE : REQUIRED_FIELDS;
+  if (!req[category]) return `Unknown category: ${category}`;
+
+  for (const f of req[category]) {
+    if (!(f in data)) return `Missing field: ${f}`;
+  }
+
+  if (action === 'add') {
+    for (const [field, allowed] of Object.entries(VALID_ENUMS[category] || {})) {
+      if (data[field] && !allowed.includes(data[field]))
+        return `Invalid ${field}: ${data[field]}`;
+    }
+    if (category === 'finance') {
+      if (typeof data.amount !== 'number' || data.amount <= 0) return `Invalid amount: ${data.amount}`;
+    }
+    if (category === 'net_worth') {
+      if (typeof data.savings !== 'number' && typeof data.trading !== 'number')
+        return 'net_worth needs savings or trading';
+    }
+    if (category === 'sleep') {
+      if (typeof data.score !== 'number' || data.score < 0 || data.score > 10)
+        return `Invalid sleep score: ${data.score}`;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Summarise (mirrors the bot)
+// ---------------------------------------------------------------------------
+function summarise(category, data) {
+  if (category === 'finance') {
+    return `$${data.amount} — ${data.description} #${data.subcategory}`;
+  }
+  if (category === 'net_worth') {
+    const parts = [];
+    if ('savings' in data) parts.push(`Savings $${data.savings.toLocaleString()}`);
+    if ('trading' in data) parts.push(`Trading $${data.trading.toLocaleString()}`);
+    return parts.join(' · ');
+  }
+  if (category === 'dating') {
+    const icons = { active: '🟢', texting: '💬', backburner: '⏸️' };
+    return `${icons[data.status] || '💕'} ${data.person} — ${data.status}`;
+  }
+  if (category === 'todos') {
+    const icons = { high: '🔴', medium: '🟡', low: '🟢' };
+    let s = `${icons[data.priority] || '⚪'} ${data.task}`;
+    if (data.due) s += ` (due ${data.due})`;
+    return s;
+  }
+  if (category === 'habits') {
+    return { apps: '🚀 App shipped!', vlogs: '🎬 Vlog shot!', pm: '🚬 PM logged' }[data.habit] || data.habit;
+  }
+  if (category === 'sleep') {
+    let s = `${data.score}/10 sleep`;
+    if (data.notes) s += ` — ${data.notes}`;
+    return s;
+  }
+  return JSON.stringify(data);
+}
+
+// ---------------------------------------------------------------------------
+// Claude API call
+// ---------------------------------------------------------------------------
+async function parseWithClaude(text, cfg) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': cfg.anthropicKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-allow-browser': 'true',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      temperature: 0,
+      messages: [{ role: 'user', content: buildPrompt(text) }],
+    }),
+  });
+
+  if (!resp.ok) throw new Error(`Claude API ${resp.status}`);
+  const body = await resp.json();
+  let content = body.content[0].text.trim();
+  content = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '');
+  return JSON.parse(content);
+}
+
+// ---------------------------------------------------------------------------
+// Supabase save
+// ---------------------------------------------------------------------------
+async function saveToSupabase(category, data, cfg) {
+  const row = {
+    user_id: cfg.userId,
+    category,
+    data: JSON.stringify(data),
+    created_at: new Date().toISOString(),
+  };
+  const resp = await fetch(`${cfg.dbUrl}/rest/v1/dashboard_entries`, {
+    method: 'POST',
+    headers: {
+      apikey: cfg.dbKey,
+      Authorization: `Bearer ${cfg.dbKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(row),
+  });
+  if (!resp.ok) throw new Error(`Supabase ${resp.status}`);
+}
+
+// ---------------------------------------------------------------------------
+// Speech recognition
+// ---------------------------------------------------------------------------
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isListening = false;
+
+function initRecognition() {
+  if (!SpeechRecognition) return null;
+  const r = new SpeechRecognition();
+  r.continuous = false;
+  r.interimResults = true;
+  r.lang = 'en-SG';
+
+  r.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t;
+      else interim += t;
+    }
+    transcriptEl.textContent = final || interim;
+  };
+
+  r.onend = () => {
+    if (!isListening) return;
+    isListening = false;
+    const text = transcriptEl.textContent.trim();
+    if (text) processText(text);
+    else setState('idle', { transcript: '', result: '' });
+  };
+
+  r.onerror = (e) => {
+    isListening = false;
+    if (e.error === 'no-speech') {
+      setState('idle', { transcript: '', result: '' });
+    } else {
+      setState('error', { result: `Mic error: ${e.error}` });
+      scheduleReset();
+    }
+  };
+
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Main flow
+// ---------------------------------------------------------------------------
+async function processText(text) {
+  const cfg = loadConfig();
+  if (!isConfigured(cfg)) {
+    setState('error', { result: 'Open ⚙️ settings first' });
+    scheduleReset(5000);
+    return;
+  }
+
+  setState('processing', { transcript: text });
+
+  try {
+    const parsed = await parseWithClaude(text, cfg);
+
+    if (parsed.needs_clarification) {
+      setState('clarify', { result: parsed.clarification_question || 'Could you rephrase?' });
+      scheduleReset(6000);
+      return;
+    }
+
+    const err = validate(parsed);
+    if (err) {
+      setState('error', { result: err });
+      scheduleReset();
+      return;
+    }
+
+    // Apply date defaults
+    const today = new Date().toISOString().slice(0, 10);
+    const data = parsed.data;
+    ['finance','net_worth','dating','habits','sleep'].forEach(cat => {
+      if (parsed.category === cat && !data.date) data.date = today;
+    });
+    if (parsed.category === 'todos') {
+      data.status = data.status || 'pending';
+      data.tags = data.tags || [];
+    }
+
+    await saveToSupabase(parsed.category, data, cfg);
+
+    const summary = summarise(parsed.category, data);
+    setState('success', { result: summary });
+    scheduleReset(4000);
+
+  } catch (e) {
+    console.error(e);
+    setState('error', { result: e.message || 'Something went wrong' });
+    scheduleReset();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mic button handler
+// ---------------------------------------------------------------------------
+micBtn.addEventListener('click', () => {
+  clearTimeout(resetTimer);
+
+  // If showing a result state, reset and wait for next tap
+  if (['success','error','clarify'].includes(currentState)) {
+    setState('idle', { transcript: '', result: '' });
+    return;
+  }
+
+  if (currentState === 'processing') return;
+
+  if (currentState === 'listening') {
+    // Stop listening
+    isListening = false;
+    recognition?.stop();
+    return;
+  }
+
+  // Start listening
+  const cfg = loadConfig();
+  if (!isConfigured(cfg)) {
+    openSettings();
+    return;
+  }
+
+  if (!SpeechRecognition) {
+    setState('error', { result: 'Speech recognition not supported in this browser' });
+    scheduleReset(5000);
+    return;
+  }
+
+  recognition = initRecognition();
+  isListening = true;
+  transcriptEl.textContent = '';
+  resultEl.textContent = '';
+  resultEl.className = '';
+  setState('listening');
+  recognition.start();
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/voice-sw.js').catch(() => {});
+}
+
+// Open settings on first load if unconfigured
+window.addEventListener('load', () => {
+  if (!isConfigured(loadConfig())) openSettings();
+});
+</script>
+</body>
+</html>
