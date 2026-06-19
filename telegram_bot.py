@@ -79,7 +79,7 @@ Today's date: {current_date}
 
 ACTIONS:
 - "add" (default): log a new entry
-- "remove": delete an existing entry. User might say "remove", "delete", "undo", "cancel", etc.
+- "remove": delete an existing entry. Use this when the user says "remove", "delete", "undo", "cancel", "that was wrong", "ignore that", "scratch that", "take that back", "not that", or any similar correction. If the user is correcting or undoing something they just said, ALWAYS use action "remove", never "add".
 
 CATEGORIES (pick exactly one):
 
