@@ -1,4 +1,4 @@
-﻿"""
+"""
 Personal Dashboard Telegram Bot
 Parses natural language messages via Claude and stores structured data in Supabase.
 Supports 3 widgets: Finance, Dating, Todos.
@@ -7,6 +7,7 @@ Supports 3 widgets: Finance, Dating, Todos.
 import os
 import re
 import json
+import base64
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update, Bot
@@ -39,24 +40,13 @@ WIKI_PROMPT = """You are a wiki operation parser. Given a user message about the
 OPERATIONS:
 1. **create** â€” Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
    Required: title (string), content (markdown string)
-<<<<<<< Updated upstream
-
-2. **update** â€” Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
-   Required: title (string â€” the existing page to update), content (new full content OR content to append)
-   Optional: append (boolean, default false â€” if true, append content to existing page instead of replacing)
-
-=======
    
 2. **update** â€” Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
    Required: title (string â€” the existing page to update), content (new full content OR content to append)
    Optional: append (boolean, default false â€” if true, append content to existing page instead of replacing)
 
->>>>>>> Stashed changes
 3. **delete** â€” Delete a page. User might say "wiki delete X", "wiki remove X"
    Required: title (string)
-
-4. **query** â€” Search and answer a question from the wiki. User might say "wiki what is X", "wiki search X", "wiki tell me about X", "wiki how do I X", or any question prefixed with "wiki".
-   Required: query (string â€” the search term or question to answer)
 
 RULES:
 - Return ONLY a valid JSON object.
@@ -67,10 +57,9 @@ RULES:
 
 OUTPUT SCHEMA:
 {{
-  "operation": "create" | "update" | "delete" | "query",
+  "operation": "create" | "update" | "delete",
   "title": "Page Title",
   "content": "markdown content...",
-  "query": "search term or question",
   "append": false,
   "needs_clarification": false,
   "clarification_question": null
@@ -457,8 +446,6 @@ def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | No
 
 
 # ---------------------------------------------------------------------------
-<<<<<<< Updated upstream
-=======
 # Prospect helpers
 # ---------------------------------------------------------------------------
 async def find_prospect(user_id: int, name: str) -> dict | None:
@@ -620,7 +607,6 @@ async def _process_conversation_screenshot(update: Update, context: ContextTypes
 
 
 # ---------------------------------------------------------------------------
->>>>>>> Stashed changes
 # Telegram handlers
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -802,8 +788,6 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"âŒ /delete error: {e}")
         await update.message.reply_text("âŒ Something went wrong.")
-<<<<<<< Updated upstream
-=======
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -827,7 +811,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"âŒ handle_photo error: {e}")
         await update.message.reply_text(f"âŒ Failed to process photo: {e}")
->>>>>>> Stashed changes
 
 
 async def toggle_demo_mode(update: Update, user_id: int):
@@ -879,11 +862,6 @@ async def toggle_demo_mode(update: Update, user_id: int):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any text message â€” parse and store or remove."""
-<<<<<<< Updated upstream
-    user_message = update.message.text
-    user_id = update.message.from_user.id
-
-=======
     user_message = update.message.text.strip()
     user_id = update.message.from_user.id
 
@@ -933,7 +911,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("âŒ Failed to create prospect. Try again.")
         return
 
->>>>>>> Stashed changes
     # Check for wiki commands first
     if re.search(r'\bwiki\b', user_message, re.IGNORECASE):
         await handle_wiki(update, user_message, user_id)
@@ -1295,97 +1272,6 @@ async def _ensure_main_page(user_id: int):
         await _wiki_create(user_id, "Main", "# Welcome to your Personal Wiki\n\nThis is your starting page. Edit it via Telegram!")
 
 
-async def _wiki_search(user_id: int, query: str) -> list[dict]:
-    """Search wiki_pages by title and content using Supabase full-text search."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Search by title first
-            title_resp = await client.get(
-                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
-                headers={
-                    "apikey": DATABASE_KEY,
-                    "Authorization": f"Bearer {DATABASE_KEY}",
-                },
-                params={
-                    "user_id": f"eq.{user_id}",
-                    "title": f"ilike.%{query}%",
-                    "select": "title,slug,content",
-                    "limit": "3",
-                },
-            )
-            # Search by content
-            content_resp = await client.get(
-                f"{DATABASE_URL}/rest/v1/{WIKI_TABLE}",
-                headers={
-                    "apikey": DATABASE_KEY,
-                    "Authorization": f"Bearer {DATABASE_KEY}",
-                },
-                params={
-                    "user_id": f"eq.{user_id}",
-                    "content": f"ilike.%{query}%",
-                    "select": "title,slug,content",
-                    "limit": "3",
-                },
-            )
-
-        results = []
-        seen_slugs = set()
-        for row in (title_resp.json() if title_resp.status_code == 200 else []) + \
-                    (content_resp.json() if content_resp.status_code == 200 else []):
-            if row["slug"] not in seen_slugs:
-                results.append(row)
-                seen_slugs.add(row["slug"])
-
-        return results[:5]  # cap at 5 pages
-
-    except Exception as e:
-        print(f"âŒ Wiki search error: {e}")
-        return []
-
-
-async def _wiki_answer(query: str, pages: list[dict]) -> str:
-    """Use Claude to answer a question based on matched wiki pages."""
-    if not pages:
-        return None
-
-    context = "\n\n---\n\n".join(
-        f"# {p['title']}\n{p['content']}" for p in pages
-    )
-
-    prompt = f"""You are a personal knowledge assistant. Answer the user's question using ONLY the wiki pages provided below.
-Be concise and direct. If the pages don't contain enough information to answer, say so clearly.
-Do not make up information. Reference page titles where relevant.
-
-WIKI PAGES:
-{context}
-
-USER QUESTION: {query}
-
-Answer:"""
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-        if resp.status_code == 200:
-            return resp.json()["content"][0]["text"].strip()
-        return None
-    except Exception as e:
-        print(f"âŒ Wiki answer error: {e}")
-        return None
-
-
 async def handle_wiki(update: Update, user_message: str, user_id: int):
     """Handle wiki-related messages."""
     await update.message.chat.send_action("typing")
@@ -1434,31 +1320,9 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
             await update.message.reply_text(f"ðŸ—‘ï¸ Deleted wiki page: *{title}*", parse_mode="Markdown")
         else:
             await update.message.reply_text(f"âŒ Page *{title}* not found.", parse_mode="Markdown")
-<<<<<<< Updated upstream
-
-    elif op == "query":
-        query = parsed.get("query", user_message)
-        pages = await _wiki_search(user_id, query)
-        if not pages:
-            await update.message.reply_text("ðŸ” No wiki pages found for that query.")
-            return
-        answer = await _wiki_answer(query, pages)
-        if answer:
-            sources = ", ".join(f"*{p['title']}*" for p in pages)
-            await update.message.reply_text(
-                f"{answer}\n\nðŸ“– Sources: {sources}",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text("âŒ Couldn't generate an answer. Try rephrasing.")
-
-    else:
-        await update.message.reply_text("ðŸ¤” I didn't understand that wiki command. Try: wiki create/update/delete/search [title or question]")
-=======
 
     else:
         await update.message.reply_text("ðŸ¤” I didn't understand that wiki command. Try: wiki create/update/delete [title]")
->>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
@@ -1565,6 +1429,7 @@ def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("recent", cmd_recent))
     app.add_handler(CommandHandler("delete", cmd_delete))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Schedule reminder checker every 60 seconds
