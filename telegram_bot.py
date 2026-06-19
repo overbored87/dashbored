@@ -39,11 +39,19 @@ WIKI_PROMPT = """You are a wiki operation parser. Given a user message about the
 OPERATIONS:
 1. **create** â€” Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
    Required: title (string), content (markdown string)
+<<<<<<< Updated upstream
 
 2. **update** â€” Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
    Required: title (string â€” the existing page to update), content (new full content OR content to append)
    Optional: append (boolean, default false â€” if true, append content to existing page instead of replacing)
 
+=======
+   
+2. **update** â€” Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
+   Required: title (string â€” the existing page to update), content (new full content OR content to append)
+   Optional: append (boolean, default false â€” if true, append content to existing page instead of replacing)
+
+>>>>>>> Stashed changes
 3. **delete** â€” Delete a page. User might say "wiki delete X", "wiki remove X"
    Required: title (string)
 
@@ -449,6 +457,170 @@ def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | No
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< Updated upstream
+=======
+# Prospect helpers
+# ---------------------------------------------------------------------------
+async def find_prospect(user_id: int, name: str) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{DATABASE_URL}/rest/v1/prospects",
+                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
+                params={"user_id": f"eq.{user_id}", "name": f"ilike.{name}", "archived": "eq.false"},
+            )
+        rows = resp.json() if resp.status_code == 200 else []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"âŒ find_prospect error: {e}")
+        return None
+
+
+async def create_prospect(user_id: int, name: str, stage: str, notes: str | None, rating: float | None) -> bool:
+    row = {
+        "user_id": str(user_id),
+        "name": name,
+        "stage": stage,
+        "notes": notes,
+        "rating": rating,
+        "logs": [],
+        "archived": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{DATABASE_URL}/rest/v1/prospects",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                json=row,
+            )
+        return resp.status_code in (200, 201)
+    except Exception as e:
+        print(f"âŒ create_prospect error: {e}")
+        return False
+
+
+async def update_prospect_notes(user_id: int, prospect_id: str, notes: str, rating: float | None) -> bool:
+    update = {"notes": notes, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if rating is not None:
+        update["rating"] = rating
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{DATABASE_URL}/rest/v1/prospects",
+                headers={
+                    "apikey": DATABASE_KEY,
+                    "Authorization": f"Bearer {DATABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                params={"id": f"eq.{prospect_id}"},
+                json=update,
+            )
+        return resp.status_code in (200, 204)
+    except Exception as e:
+        print(f"âŒ update_prospect_notes error: {e}")
+        return False
+
+
+async def analyze_conversation_screenshot(image_b64: str, prospect_name: str) -> dict:
+    prompt = f"""You are analyzing a dating app / messaging conversation between the user and {prospect_name}.
+
+IMPORTANT: Text bubbles on the RIGHT side of the screen are sent by the USER. Text bubbles on the LEFT side are sent by {prospect_name}. Do not mix these up.
+
+Assess {prospect_name}'s messages for vibe, engagement, and interest level. The user's messages provide context only.
+
+Return ONLY a valid JSON object, no markdown:
+{{
+  "notes": "Vibe: <one line>\\nInterests: <comma-separated or â€” if unclear>\\nGreen flags: <one line or â€”>\\nRed flags: <one line or â€”>\\nNext move: <one line>",
+  "rating": <number 0.5-5 in 0.5 increments>,
+  "rating_reason": "<one line>"
+}}
+
+Rating guide (based on HER messages only):
+1.0-1.5 = barely engaged, very short replies
+2.0-2.5 = polite but passive
+3.0-3.5 = decent engagement, some warmth
+4.0-4.5 = high engagement, asks questions, enthusiasm
+5.0 = exceptional, initiates topics, suggests meetups"""
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 1024,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            },
+        )
+
+    if resp.status_code != 200:
+        raise Exception(f"Claude API {resp.status_code}: {resp.text}")
+
+    text = resp.json()["content"][0]["text"].strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+async def _process_conversation_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE, image_b64: str, name: str, user_id: int):
+    await update.message.chat.send_action("typing")
+
+    prospect = await find_prospect(user_id, name)
+
+    try:
+        result = await analyze_conversation_screenshot(image_b64, name)
+    except Exception as e:
+        await update.message.reply_text(f"âŒ Analysis failed: {e}")
+        return
+
+    rating = result.get("rating")
+    rating_str = f"\nâ­ *{rating}/5* â€” {result.get('rating_reason', '')}" if rating else ""
+    preview = f"ðŸ“Š *Analysis for {name}*\n\n{result['notes']}{rating_str}"
+
+    if not prospect:
+        context.user_data["pending_create"] = {
+            "name": name,
+            "notes": result["notes"],
+            "rating": rating,
+        }
+        await update.message.reply_text(
+            f"{preview}\n\n*{name}* isn't in your pipeline yet. What stage is she?\n`texting` Â· `first_date` Â· `seeing` Â· `back_burner`\n\nReply with the stage to create her, or *no* to discard.",
+            parse_mode="Markdown",
+        )
+        return
+
+    context.user_data["pending_analysis"] = {
+        "prospect_id": prospect["id"],
+        "prospect_name": prospect["name"],
+        "notes": result["notes"],
+        "rating": rating,
+        "rating_reason": result.get("rating_reason"),
+    }
+
+    await update.message.reply_text(
+        f"{preview}\n\nApply to notes? Reply *yes* to save or *no* to discard.",
+        parse_mode="Markdown",
+    )
+
+
+# ---------------------------------------------------------------------------
+>>>>>>> Stashed changes
 # Telegram handlers
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,6 +802,32 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"âŒ /delete error: {e}")
         await update.message.reply_text("âŒ Something went wrong.")
+<<<<<<< Updated upstream
+=======
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages â€” conversation screenshot analysis."""
+    user_id = update.message.from_user.id
+    caption = (update.message.caption or "").strip()
+
+    try:
+        await update.message.chat.send_action("typing")
+
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        photo_bytes = await file.download_as_bytearray()
+        image_b64 = base64.b64encode(bytes(photo_bytes)).decode()
+
+        if caption:
+            await _process_conversation_screenshot(update, context, image_b64, caption, user_id)
+        else:
+            context.user_data["pending_photo"] = {"b64": image_b64}
+            await update.message.reply_text("ðŸ“¸ Got it. Who is this conversation with? (reply with her name)")
+    except Exception as e:
+        print(f"âŒ handle_photo error: {e}")
+        await update.message.reply_text(f"âŒ Failed to process photo: {e}")
+>>>>>>> Stashed changes
 
 
 async def toggle_demo_mode(update: Update, user_id: int):
@@ -681,9 +879,61 @@ async def toggle_demo_mode(update: Update, user_id: int):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any text message â€” parse and store or remove."""
+<<<<<<< Updated upstream
     user_message = update.message.text
     user_id = update.message.from_user.id
 
+=======
+    user_message = update.message.text.strip()
+    user_id = update.message.from_user.id
+
+    # Pending photo: waiting for prospect name
+    if "pending_photo" in context.user_data:
+        photo_data = context.user_data.pop("pending_photo")
+        await _process_conversation_screenshot(update, context, photo_data["b64"], user_message, user_id)
+        return
+
+    # Pending analysis: waiting for yes/no confirmation
+    if "pending_analysis" in context.user_data:
+        if user_message.lower() in ("yes", "y", "apply", "ok", "yep", "yeah", "sure"):
+            pa = context.user_data.pop("pending_analysis")
+            success = await update_prospect_notes(user_id, pa["prospect_id"], pa["notes"], pa.get("rating"))
+            if success:
+                await update.message.reply_text(f"âœ… Notes updated for *{pa['prospect_name']}*", parse_mode="Markdown")
+            else:
+                await update.message.reply_text("âŒ Failed to save. Try again.")
+            return
+        elif user_message.lower() in ("no", "n", "nope", "discard", "cancel"):
+            context.user_data.pop("pending_analysis")
+            await update.message.reply_text("ðŸ—‘ï¸ Discarded.")
+            return
+
+    # Pending create: waiting for stage selection
+    VALID_STAGES = {"texting", "first_date", "seeing", "back_burner"}
+    if "pending_create" in context.user_data:
+        if user_message.lower() in ("no", "n", "cancel", "discard"):
+            context.user_data.pop("pending_create")
+            await update.message.reply_text("ðŸ—‘ï¸ Discarded.")
+            return
+        stage = user_message.lower().strip().replace(" ", "_")
+        if stage not in VALID_STAGES:
+            await update.message.reply_text(
+                f"Please reply with one of: `texting` Â· `first_date` Â· `seeing` Â· `back_burner`",
+                parse_mode="Markdown",
+            )
+            return
+        pc = context.user_data.pop("pending_create")
+        success = await create_prospect(user_id, pc["name"], stage, pc.get("notes"), pc.get("rating"))
+        if success:
+            await update.message.reply_text(
+                f"âœ… *{pc['name']}* added to your pipeline ({stage}) with notes from the analysis.",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text("âŒ Failed to create prospect. Try again.")
+        return
+
+>>>>>>> Stashed changes
     # Check for wiki commands first
     if re.search(r'\bwiki\b', user_message, re.IGNORECASE):
         await handle_wiki(update, user_message, user_id)
@@ -1184,6 +1434,7 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
             await update.message.reply_text(f"ðŸ—‘ï¸ Deleted wiki page: *{title}*", parse_mode="Markdown")
         else:
             await update.message.reply_text(f"âŒ Page *{title}* not found.", parse_mode="Markdown")
+<<<<<<< Updated upstream
 
     elif op == "query":
         query = parsed.get("query", user_message)
@@ -1203,6 +1454,11 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
 
     else:
         await update.message.reply_text("ðŸ¤” I didn't understand that wiki command. Try: wiki create/update/delete/search [title or question]")
+=======
+
+    else:
+        await update.message.reply_text("ðŸ¤” I didn't understand that wiki command. Try: wiki create/update/delete [title]")
+>>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
