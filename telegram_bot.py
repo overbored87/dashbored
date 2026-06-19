@@ -742,11 +742,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Delete the most recent entry."""
+    """Delete the most recent entry, or search by description if args given."""
     user_id = str(update.message.from_user.id)
+    query = " ".join(context.args).strip().lower() if context.args else ""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Fetch the latest entry's id
             resp = await client.get(
                 f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
@@ -756,8 +756,8 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 params={
                     "user_id": f"eq.{user_id}",
                     "order": "created_at.desc",
-                    "limit": "1",
-                    "select": "id,category,data",
+                    "limit": "50" if query else "1",
+                    "select": "id,category,data,created_at",
                 },
             )
 
@@ -765,17 +765,30 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Nothing to delete.")
                 return
 
-            entry = resp.json()[0]
-            entry_id = entry["id"]
+            rows = resp.json()
 
-            # Delete it
+            if query:
+                best, best_score = None, 0
+                for row in rows:
+                    d = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
+                    haystack = " ".join(str(v) for v in d.values()).lower()
+                    score = sum(1 for word in query.split() if word in haystack)
+                    if score > best_score:
+                        best_score, best = score, row
+                if not best or best_score == 0:
+                    await update.message.reply_text("❌ No matching entry found.")
+                    return
+                entry = best
+            else:
+                entry = rows[0]
+
             del_resp = await client.delete(
                 f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
                 headers={
                     "apikey": DATABASE_KEY,
                     "Authorization": f"Bearer {DATABASE_KEY}",
                 },
-                params={"id": f"eq.{entry_id}"},
+                params={"id": f"eq.{entry['id']}"},
             )
 
         if del_resp.status_code in (200, 204):
