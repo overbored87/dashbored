@@ -38,14 +38,14 @@ WIKI_TABLE = "wiki_pages"
 WIKI_PROMPT = """You are a wiki operation parser. Given a user message about their personal wiki, extract the operation.
 
 OPERATIONS:
-1. **create** â€” Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
+1. **create** — Create a new wiki page. User might say "wiki create page about X", "wiki new page: Title", "add to wiki: Title - content..."
    Required: title (string), content (markdown string)
    
-2. **update** â€” Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
-   Required: title (string â€” the existing page to update), content (new full content OR content to append)
-   Optional: append (boolean, default false â€” if true, append content to existing page instead of replacing)
+2. **update** — Update an existing page. User might say "wiki update X", "wiki edit X to add...", "wiki append to X: ..."
+   Required: title (string — the existing page to update), content (new full content OR content to append)
+   Optional: append (boolean, default false — if true, append content to existing page instead of replacing)
 
-3. **delete** â€” Delete a page. User might say "wiki delete X", "wiki remove X"
+3. **delete** — Delete a page. User might say "wiki delete X", "wiki remove X"
    Required: title (string)
 
 RULES:
@@ -70,10 +70,10 @@ Now parse this message:
 """
 
 # ---------------------------------------------------------------------------
-# Parsing prompt â€” tightly scoped to 3 categories
+# Parsing prompt — tightly scoped to 3 categories
 # ---------------------------------------------------------------------------
 PARSING_PROMPT = """You are a structured-data extraction engine for a personal dashboard.
-Your ONLY job is to return valid JSON â€” no commentary, no markdown fences.
+Your ONLY job is to return valid JSON — no commentary, no markdown fences.
 
 Today's date: {current_date}
 
@@ -83,26 +83,26 @@ ACTIONS:
 
 CATEGORIES (pick exactly one):
 
-1. **finance** â€” any mention of spending, bills, subscriptions, purchases.
+1. **finance** — any mention of spending, bills, subscriptions, purchases.
    For action "add":
      Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
      subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
    For action "remove":
-     Provide as many identifying fields as possible: amount, description, subcategory, date â€” whatever the user mentions.
+     Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
 
-2. **net_worth** â€” account balance updates for savings or trading accounts. User might say "savings 15000", "trading acc 8500", or update both at once like "savings 15k, trading 8k".
+2. **net_worth** — account balance updates for savings or trading accounts. User might say "savings 15000", "trading acc 8500", or update both at once like "savings 15k, trading 8k".
    Action is always "add" (each message is a new snapshot).
    Required: at least one of savings (number) or trading (number). Include both if the user provides both.
    Optional: date (YYYY-MM-DD, default today)
 
-3. **dating** â€” matches, dates, follow-ups, rejections, relationship status updates.
+3. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
    For action "add":
      Required: person (title case), status ("active" | "texting" | "backburner")
      Optional: platform, activity, location, notes, date (YYYY-MM-DD), rating (1-5)
    For action "remove":
      Required: person (the name to remove)
 
-4. **todos** â€” tasks, reminders, goals, deadlines.
+4. **todos** — tasks, reminders, goals, deadlines.
    For action "add":
      Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
      Optional: due (YYYY-MM-DD), tags (list of strings), reminder_time (ISO 8601 with timezone, e.g. "2026-02-15T15:00:00+08:00")
@@ -110,30 +110,30 @@ CATEGORIES (pick exactly one):
    Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
    Always use timezone offset +08:00 (Singapore Time).
 
-5. **habits** â€” tracking recurring habits: apps coded, vlogs shot, or PM.
+5. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
    Action is always "add" (each message logs one occurrence).
    Required: habit ("apps" | "vlogs" | "pm")
    Optional: date (YYYY-MM-DD, default today), notes (string)
    Trigger examples:
-   - "coded an app", "shipped an app", "launched a new app", "built an app" â†’ habit: "apps"
-   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" â†’ habit: "vlogs"
-   - "PM", "pm" â†’ habit: "pm"
+   - "coded an app", "shipped an app", "launched a new app", "built an app" → habit: "apps"
+   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
+   - "PM", "pm" → habit: "pm"
 
-6. **sleep** â€” daily sleep quality score with optional notes.
+6. **sleep** — daily sleep quality score with optional notes.
    Action is always "add".
    Required: score (number 0-10, supports decimals like 7.5)
-   Optional: date (YYYY-MM-DD, default today), notes (string â€” brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
+   Optional: date (YYYY-MM-DD, default today), notes (string — brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
    Trigger examples:
-   - "sleep 7.5" â†’ score: 7.5
-   - "sleep 6/10 alcohol, slept late" â†’ score: 6, notes: "alcohol, slept late"
-   - "last night 8/10 melatonin" â†’ score: 8, notes: "melatonin"
+   - "sleep 7.5" → score: 7.5
+   - "sleep 6/10 alcohol, slept late" → score: 6, notes: "alcohol, slept late"
+   - "last night 8/10 melatonin" → score: 8, notes: "melatonin"
 
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
-- All dates must be YYYY-MM-DD. Resolve relative dates (e.g. "Friday" â†’ next Friday).
+- All dates must be YYYY-MM-DD. Resolve relative dates (e.g. "Friday" → next Friday).
 - If "yesterday" is mentioned, subtract 1 day from today.
-- Currency is always SGD â€” do not include a currency field.
+- Currency is always SGD — do not include a currency field.
 - confidence: float 0-1 reflecting how certain you are of the parse.
 - If the message is ambiguous or doesn't fit any category, set:
   "category": "unknown", "needs_clarification": true, "clarification_question": "<your question>"
@@ -154,7 +154,7 @@ Now parse this message:
 
 
 # ---------------------------------------------------------------------------
-# Validation schemas â€” enforce required fields per category
+# Validation schemas — enforce required fields per category
 # ---------------------------------------------------------------------------
 REQUIRED_FIELDS = {
     "finance": {"amount", "description", "subcategory"},
@@ -233,7 +233,7 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# Claude API â€” parse message
+# Claude API — parse message
 # ---------------------------------------------------------------------------
 async def parse_with_claude(message_text: str) -> dict:
     """Send the message to Claude for structured extraction."""
@@ -264,7 +264,7 @@ async def parse_with_claude(message_text: str) -> dict:
             )
 
         if resp.status_code != 200:
-            print(f"âŒ Claude API {resp.status_code}: {resp.text}")
+            print(f"❌ Claude API {resp.status_code}: {resp.text}")
             return _error_response("Sorry, I had trouble processing that. Could you try again?")
 
         content = resp.json()["content"][0]["text"].strip()
@@ -281,7 +281,7 @@ async def parse_with_claude(message_text: str) -> dict:
 
         is_valid, err = validate_parsed(parsed)
         if not is_valid:
-            print(f"âš ï¸  Validation failed: {err}")
+            print(f"⚠️  Validation failed: {err}")
             return _error_response("I wasn't sure how to categorise that. Could you rephrase?")
 
         # Inject defaults
@@ -289,10 +289,10 @@ async def parse_with_claude(message_text: str) -> dict:
         return parsed
 
     except json.JSONDecodeError as e:
-        print(f"âŒ JSON parse error: {e}\nRaw content: {content!r}")
+        print(f"❌ JSON parse error: {e}\nRaw content: {content!r}")
         return _error_response("I couldn't understand that. Could you rephrase?")
     except Exception as e:
-        print(f"âŒ Unexpected error in parse_with_claude: {e}")
+        print(f"❌ Unexpected error in parse_with_claude: {e}")
         return _error_response("Something went wrong. Please try again.")
 
 
@@ -337,7 +337,7 @@ async def save_to_supabase(category: str, data: dict, user_id: int) -> bool:
     row = {
         "user_id": str(user_id),
         "category": category,
-        "data": json.dumps(data),       # JSONB column â€” store as string for the REST API
+        "data": json.dumps(data),       # JSONB column — store as string for the REST API
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -355,14 +355,14 @@ async def save_to_supabase(category: str, data: dict, user_id: int) -> bool:
             )
 
         if resp.status_code in (200, 201):
-            print(f"âœ… Saved to Supabase: {category}")
+            print(f"✅ Saved to Supabase: {category}")
             return True
         else:
-            print(f"âŒ Supabase error {resp.status_code}: {resp.text}")
+            print(f"❌ Supabase error {resp.status_code}: {resp.text}")
             return False
 
     except Exception as e:
-        print(f"âŒ Supabase request failed: {e}")
+        print(f"❌ Supabase request failed: {e}")
         return False
 
 
@@ -411,7 +411,7 @@ async def remove_from_supabase(category: str, data: dict, user_id: int) -> dict 
             return None
 
     except Exception as e:
-        print(f"âŒ Supabase remove failed: {e}")
+        print(f"❌ Supabase remove failed: {e}")
         return None
 
 
@@ -459,7 +459,7 @@ async def find_prospect(user_id: int, name: str) -> dict | None:
         rows = resp.json() if resp.status_code == 200 else []
         return rows[0] if rows else None
     except Exception as e:
-        print(f"âŒ find_prospect error: {e}")
+        print(f"❌ find_prospect error: {e}")
         return None
 
 
@@ -487,7 +487,7 @@ async def create_prospect(user_id: int, name: str, stage: str, notes: str | None
             )
         return resp.status_code in (200, 201)
     except Exception as e:
-        print(f"âŒ create_prospect error: {e}")
+        print(f"❌ create_prospect error: {e}")
         return False
 
 
@@ -510,7 +510,7 @@ async def update_prospect_notes(user_id: int, prospect_id: str, notes: str, rati
             )
         return resp.status_code in (200, 204)
     except Exception as e:
-        print(f"âŒ update_prospect_notes error: {e}")
+        print(f"❌ update_prospect_notes error: {e}")
         return False
 
 
@@ -523,7 +523,7 @@ Assess {prospect_name}'s messages for vibe, engagement, and interest level. The 
 
 Return ONLY a valid JSON object, no markdown:
 {{
-  "notes": "Vibe: <one line>\\nInterests: <comma-separated or â€” if unclear>\\nGreen flags: <one line or â€”>\\nRed flags: <one line or â€”>\\nNext move: <one line>",
+  "notes": "Vibe: <one line>\\nInterests: <comma-separated or — if unclear>\\nGreen flags: <one line or —>\\nRed flags: <one line or —>\\nNext move: <one line>",
   "rating": <number 0.5-5 in 0.5 increments>,
   "rating_reason": "<one line>"
 }}
@@ -573,12 +573,12 @@ async def _process_conversation_screenshot(update: Update, context: ContextTypes
     try:
         result = await analyze_conversation_screenshot(image_b64, name)
     except Exception as e:
-        await update.message.reply_text(f"âŒ Analysis failed: {e}")
+        await update.message.reply_text(f"❌ Analysis failed: {e}")
         return
 
     rating = result.get("rating")
-    rating_str = f"\nâ­ *{rating}/5* â€” {result.get('rating_reason', '')}" if rating else ""
-    preview = f"ðŸ“Š *Analysis for {name}*\n\n{result['notes']}{rating_str}"
+    rating_str = f"\n⭐ *{rating}/5* — {result.get('rating_reason', '')}" if rating else ""
+    preview = f"📊 *Analysis for {name}*\n\n{result['notes']}{rating_str}"
 
     if not prospect:
         context.user_data["pending_create"] = {
@@ -587,7 +587,7 @@ async def _process_conversation_screenshot(update: Update, context: ContextTypes
             "rating": rating,
         }
         await update.message.reply_text(
-            f"{preview}\n\n*{name}* isn't in your pipeline yet. What stage is she?\n`texting` Â· `first_date` Â· `seeing` Â· `back_burner`\n\nReply with the stage to create her, or *no* to discard.",
+            f"{preview}\n\n*{name}* isn't in your pipeline yet. What stage is she?\n`texting` · `first_date` · `seeing` · `back_burner`\n\nReply with the stage to create her, or *no* to discard.",
             parse_mode="Markdown",
         )
         return
@@ -611,36 +611,36 @@ async def _process_conversation_screenshot(update: Update, context: ContextTypes
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ðŸ‘‹ *Welcome to your Personal Dashboard Bot!*\n\n"
+        "👋 *Welcome to your Personal Dashboard Bot!*\n\n"
         "Just send me messages naturally and I'll log them:\n\n"
-        "ðŸ’° *Finance*\n"
-        "  â€¢ _Spent $50 on groceries_\n"
-        "  â€¢ _Earned $3000 freelance payment_\n"
-        "  â€¢ _Netflix subscription $15.90_\n\n"
-        "ðŸ’• *Dating*\n"
-        "  â€¢ _Matched with Emma on Hinge_\n"
-        "  â€¢ _Had coffee with Jessica, went great_\n"
-        "  â€¢ _Alex hasn't replied in 3 days_\n\n"
-        "âœ… *To-dos*\n"
-        "  â€¢ _Finish Q1 report by Friday_\n"
-        "  â€¢ _Buy birthday gift for mom_\n\n"
-        "Commands: /stats Â· /recent Â· /help",
+        "💰 *Finance*\n"
+        "  • _Spent $50 on groceries_\n"
+        "  • _Earned $3000 freelance payment_\n"
+        "  • _Netflix subscription $15.90_\n\n"
+        "💕 *Dating*\n"
+        "  • _Matched with Emma on Hinge_\n"
+        "  • _Had coffee with Jessica, went great_\n"
+        "  • _Alex hasn't replied in 3 days_\n\n"
+        "✅ *To-dos*\n"
+        "  • _Finish Q1 report by Friday_\n"
+        "  • _Buy birthday gift for mom_\n\n"
+        "Commands: /stats · /recent · /help",
         parse_mode="Markdown",
     )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ðŸ“– *How to use this bot*\n\n"
-        "Just type naturally â€” I'll figure out the category.\n\n"
+        "📖 *How to use this bot*\n\n"
+        "Just type naturally — I'll figure out the category.\n\n"
         "Tips:\n"
-        "â€¢ Include dollar amounts for finance entries\n"
-        "â€¢ Mention people's names for dating entries\n"
-        "â€¢ Use words like 'need to', 'should', 'by Friday' for todos\n\n"
+        "• Include dollar amounts for finance entries\n"
+        "• Mention people's names for dating entries\n"
+        "• Use words like 'need to', 'should', 'by Friday' for todos\n\n"
         "Commands:\n"
-        "/stats â€” quick summary of your data\n"
-        "/recent â€” last 5 entries\n"
-        "/delete â€” remove the last entry",
+        "/stats — quick summary of your data\n"
+        "/recent — last 5 entries\n"
+        "/delete — remove the last entry",
         parse_mode="Markdown",
     )
 
@@ -665,7 +665,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         if resp.status_code != 200:
-            await update.message.reply_text("âŒ Couldn't fetch recent entries.")
+            await update.message.reply_text("❌ Couldn't fetch recent entries.")
             return
 
         rows = resp.json()
@@ -673,20 +673,20 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No entries yet! Send me a message to get started.")
             return
 
-        lines = ["ðŸ“‹ *Recent entries:*\n"]
-        emoji_map = {"finance": "ðŸ’°", "net_worth": "ðŸ¦", "dating": "ðŸ’•", "todos": "âœ…", "habits": "ðŸ”", "sleep": "ðŸ˜´"}
+        lines = ["📋 *Recent entries:*\n"]
+        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
-            emoji = emoji_map.get(cat, "ðŸ“")
+            emoji = emoji_map.get(cat, "📝")
             summary = _summarise_entry(cat, data)
             lines.append(f"{emoji} {summary}")
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     except Exception as e:
-        print(f"âŒ /recent error: {e}")
-        await update.message.reply_text("âŒ Something went wrong fetching your entries.")
+        print(f"❌ /recent error: {e}")
+        await update.message.reply_text("❌ Something went wrong fetching your entries.")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -707,7 +707,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         if resp.status_code != 200:
-            await update.message.reply_text("âŒ Couldn't fetch stats.")
+            await update.message.reply_text("❌ Couldn't fetch stats.")
             return
 
         rows = resp.json()
@@ -729,16 +729,16 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     todos_pending += 1
 
         await update.message.reply_text(
-            f"ðŸ“Š *Your Stats*\n\n"
-            f"ðŸ’° Finance: {finance_count} entries Â· ${total_spent:,.2f} spent\n"
-            f"ðŸ’• Dating: {dating_count} entries\n"
-            f"âœ… Todos: {todos_pending} pending tasks",
+            f"📊 *Your Stats*\n\n"
+            f"💰 Finance: {finance_count} entries · ${total_spent:,.2f} spent\n"
+            f"💕 Dating: {dating_count} entries\n"
+            f"✅ Todos: {todos_pending} pending tasks",
             parse_mode="Markdown",
         )
 
     except Exception as e:
-        print(f"âŒ /stats error: {e}")
-        await update.message.reply_text("âŒ Something went wrong fetching stats.")
+        print(f"❌ /stats error: {e}")
+        await update.message.reply_text("❌ Something went wrong fetching stats.")
 
 
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -781,36 +781,33 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if del_resp.status_code in (200, 204):
             data = entry["data"] if isinstance(entry["data"], dict) else json.loads(entry["data"])
             summary = _summarise_entry(entry["category"], data)
-            await update.message.reply_text(f"ðŸ—‘ï¸ Deleted: {summary}")
+            await update.message.reply_text(f"🗑️ Deleted: {summary}")
         else:
-            await update.message.reply_text("âŒ Couldn't delete the entry.")
+            await update.message.reply_text("❌ Couldn't delete the entry.")
 
     except Exception as e:
-        print(f"âŒ /delete error: {e}")
-        await update.message.reply_text("âŒ Something went wrong.")
+        print(f"❌ /delete error: {e}")
+        await update.message.reply_text("❌ Something went wrong.")
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages â€” conversation screenshot analysis."""
+    """Handle photo messages — conversation screenshot analysis."""
     user_id = update.message.from_user.id
     caption = (update.message.caption or "").strip()
 
-    try:
-        await update.message.chat.send_action("typing")
+    await update.message.chat.send_action("typing")
 
-        photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
-        photo_bytes = await file.download_as_bytearray()
-        image_b64 = base64.b64encode(bytes(photo_bytes)).decode()
+    # Download the largest photo size
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    photo_bytes = await file.download_as_bytearray()
+    image_b64 = base64.b64encode(photo_bytes).decode()
 
-        if caption:
-            await _process_conversation_screenshot(update, context, image_b64, caption, user_id)
-        else:
-            context.user_data["pending_photo"] = {"b64": image_b64}
-            await update.message.reply_text("ðŸ“¸ Got it. Who is this conversation with? (reply with her name)")
-    except Exception as e:
-        print(f"âŒ handle_photo error: {e}")
-        await update.message.reply_text(f"âŒ Failed to process photo: {e}")
+    if caption:
+        await _process_conversation_screenshot(update, context, image_b64, caption, user_id)
+    else:
+        context.user_data["pending_photo"] = {"b64": image_b64}
+        await update.message.reply_text("📸 Got it. Who is this conversation with? (reply with her name)")
 
 
 async def toggle_demo_mode(update: Update, user_id: int):
@@ -851,17 +848,17 @@ async def toggle_demo_mode(update: Update, user_id: int):
             await save_to_supabase("settings", {"demo_mode": True}, user_id)
 
         if new_demo:
-            await update.message.reply_text("ðŸŽ­ Demo mode *ON*\nNet worth redacted Â· Dating hidden", parse_mode="Markdown")
+            await update.message.reply_text("🎭 Demo mode *ON*\nNet worth redacted · Dating hidden", parse_mode="Markdown")
         else:
-            await update.message.reply_text("ðŸŽ­ Demo mode *OFF*\nAll data visible", parse_mode="Markdown")
+            await update.message.reply_text("🎭 Demo mode *OFF*\nAll data visible", parse_mode="Markdown")
 
     except Exception as e:
-        print(f"âŒ Demo toggle error: {e}")
-        await update.message.reply_text("âŒ Failed to toggle demo mode.")
+        print(f"❌ Demo toggle error: {e}")
+        await update.message.reply_text("❌ Failed to toggle demo mode.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle any text message â€” parse and store or remove."""
+    """Handle any text message — parse and store or remove."""
     user_message = update.message.text.strip()
     user_id = update.message.from_user.id
 
@@ -877,13 +874,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pa = context.user_data.pop("pending_analysis")
             success = await update_prospect_notes(user_id, pa["prospect_id"], pa["notes"], pa.get("rating"))
             if success:
-                await update.message.reply_text(f"âœ… Notes updated for *{pa['prospect_name']}*", parse_mode="Markdown")
+                await update.message.reply_text(f"✅ Notes updated for *{pa['prospect_name']}*", parse_mode="Markdown")
             else:
-                await update.message.reply_text("âŒ Failed to save. Try again.")
+                await update.message.reply_text("❌ Failed to save. Try again.")
             return
         elif user_message.lower() in ("no", "n", "nope", "discard", "cancel"):
             context.user_data.pop("pending_analysis")
-            await update.message.reply_text("ðŸ—‘ï¸ Discarded.")
+            await update.message.reply_text("🗑️ Discarded.")
             return
 
     # Pending create: waiting for stage selection
@@ -891,12 +888,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "pending_create" in context.user_data:
         if user_message.lower() in ("no", "n", "cancel", "discard"):
             context.user_data.pop("pending_create")
-            await update.message.reply_text("ðŸ—‘ï¸ Discarded.")
+            await update.message.reply_text("🗑️ Discarded.")
             return
         stage = user_message.lower().strip().replace(" ", "_")
         if stage not in VALID_STAGES:
             await update.message.reply_text(
-                f"Please reply with one of: `texting` Â· `first_date` Â· `seeing` Â· `back_burner`",
+                f"Please reply with one of: `texting` · `first_date` · `seeing` · `back_burner`",
                 parse_mode="Markdown",
             )
             return
@@ -904,11 +901,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         success = await create_prospect(user_id, pc["name"], stage, pc.get("notes"), pc.get("rating"))
         if success:
             await update.message.reply_text(
-                f"âœ… *{pc['name']}* added to your pipeline ({stage}) with notes from the analysis.",
+                f"✅ *{pc['name']}* added to your pipeline ({stage}) with notes from the analysis.",
                 parse_mode="Markdown",
             )
         else:
-            await update.message.reply_text("âŒ Failed to create prospect. Try again.")
+            await update.message.reply_text("❌ Failed to create prospect. Try again.")
         return
 
     # Check for wiki commands first
@@ -928,7 +925,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Clarification needed?
     if parsed.get("needs_clarification"):
         question = parsed.get("clarification_question", "Could you provide more details?")
-        await update.message.reply_text(f"ðŸ¤” {question}")
+        await update.message.reply_text(f"🤔 {question}")
         return
 
     action = parsed.get("action", "add")
@@ -937,27 +934,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "ðŸ’°", "net_worth": "ðŸ¦", "dating": "ðŸ’•", "todos": "âœ…", "habits": "ðŸ”", "sleep": "ðŸ˜´"}
-    emoji = emoji_map.get(category, "ðŸ“")
+    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+    emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
         deleted = await remove_from_supabase(category, data, user_id)
         if deleted:
             del_data = deleted["data"] if isinstance(deleted["data"], dict) else json.loads(deleted["data"])
             summary = _summarise_entry(category, del_data)
-            await update.message.reply_text(f"ðŸ—‘ï¸ Removed: {summary}", parse_mode="Markdown")
+            await update.message.reply_text(f"🗑️ Removed: {summary}", parse_mode="Markdown")
         else:
-            await update.message.reply_text("âŒ Couldn't find a matching entry to remove.")
+            await update.message.reply_text("❌ Couldn't find a matching entry to remove.")
     else:
         success = await save_to_supabase(category, data, user_id)
         if success:
             summary = _summarise_entry(category, data)
             reply = f"{emoji} {summary}"
             if low_conf:
-                reply += "\n\nâš ï¸ _I'm not fully sure about this â€” use /delete if it's wrong._"
+                reply += "\n\n⚠️ _I'm not fully sure about this — use /delete if it's wrong._"
             await update.message.reply_text(reply, parse_mode="Markdown")
         else:
-            await update.message.reply_text("âŒ Failed to save. Please try again.")
+            await update.message.reply_text("❌ Failed to save. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +966,7 @@ def _summarise_entry(category: str, data: dict) -> str:
         amt = data.get("amount", 0)
         desc = data.get("description", "")
         subcat = data.get("subcategory", "")
-        line = f"*${amt}* â€” {desc}"
+        line = f"*${amt}* — {desc}"
         if subcat:
             line += f" `#{subcat}`"
         return line
@@ -982,15 +979,15 @@ def _summarise_entry(category: str, data: dict) -> str:
             parts.append(f"Trading: *${data['trading']:,.0f}*")
         total = data.get("savings", 0) + data.get("trading", 0)
         parts.append(f"Total: *${total:,.0f}*")
-        return " Â· ".join(parts)
+        return " · ".join(parts)
 
     elif category == "dating":
         person = data.get("person", "someone")
         status = data.get("status", "")
         notes = data.get("notes", "")
-        status_icons = {"active": "ðŸŸ¢", "texting": "ðŸ’¬", "backburner": "â¸ï¸"}
-        icon = status_icons.get(status, "ðŸ’•")
-        line = f"{icon} *{person}* â€” {status}"
+        status_icons = {"active": "🟢", "texting": "💬", "backburner": "⏸️"}
+        icon = status_icons.get(status, "💕")
+        line = f"{icon} *{person}* — {status}"
         if notes:
             line += f" ({notes})"
         return line
@@ -1000,22 +997,22 @@ def _summarise_entry(category: str, data: dict) -> str:
         priority = data.get("priority", "medium")
         due = data.get("due", "")
         reminder = data.get("reminder_time", "")
-        priority_icons = {"high": "ðŸ”´", "medium": "ðŸŸ¡", "low": "ðŸŸ¢"}
-        icon = priority_icons.get(priority, "âšª")
+        priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+        icon = priority_icons.get(priority, "⚪")
         line = f"{icon} {task}"
         if due:
             line += f" (due {due})"
         if reminder:
             try:
                 rt = datetime.fromisoformat(reminder).astimezone(LOCAL_TZ)
-                line += f"\nðŸ”” Reminder: {rt.strftime('%d/%m/%y %I:%M %p')}"
+                line += f"\n🔔 Reminder: {rt.strftime('%d/%m/%y %I:%M %p')}"
             except (ValueError, TypeError):
                 pass
         return line
 
     elif category == "habits":
         habit = data.get("habit", "")
-        habit_labels = {"apps": "ðŸš€ App shipped!", "vlogs": "ðŸŽ¬ Vlog shot!", "pm": "ðŸš¬ PM logged"}
+        habit_labels = {"apps": "🚀 App shipped!", "vlogs": "🎬 Vlog shot!", "pm": "🚬 PM logged"}
         return habit_labels.get(habit, f"Habit: {habit}")
 
     elif category == "sleep":
@@ -1023,7 +1020,7 @@ def _summarise_entry(category: str, data: dict) -> str:
         notes = data.get("notes", "")
         line = f"*{score}/10*"
         if notes:
-            line += f" â€” {notes}"
+            line += f" — {notes}"
         return line
 
     return json.dumps(data)
@@ -1064,7 +1061,7 @@ async def _wiki_parse(message_text: str) -> dict:
         text = re.sub(r"\s*```$", "", text)
         return json.loads(text)
     except Exception as e:
-        print(f"âŒ Wiki parse error: {e}")
+        print(f"❌ Wiki parse error: {e}")
         return {"needs_clarification": True, "clarification_question": "Sorry, I couldn't understand that wiki command."}
 
 
@@ -1079,7 +1076,7 @@ async def _wiki_get_all_pages(user_id: int) -> list:
             )
         return resp.json() if resp.status_code == 200 else []
     except Exception as e:
-        print(f"âŒ Wiki fetch error: {e}")
+        print(f"❌ Wiki fetch error: {e}")
         return []
 
 
@@ -1172,7 +1169,7 @@ async def _wiki_render_all(user_id: int):
                     json={"content_rendered": rendered, "updated_at": datetime.now(timezone.utc).isoformat()},
                 )
         except Exception as e:
-            print(f"âš ï¸ Wiki render error for {page['title']}: {e}")
+            print(f"⚠️ Wiki render error for {page['title']}: {e}")
 
 
 async def _wiki_create(user_id: int, title: str, content: str) -> bool:
@@ -1202,10 +1199,10 @@ async def _wiki_create(user_id: int, title: str, content: str) -> bool:
         if resp.status_code in (200, 201):
             await _wiki_render_all(user_id)
             return True
-        print(f"âš ï¸ Wiki create failed: {resp.status_code} {resp.text}")
+        print(f"⚠️ Wiki create failed: {resp.status_code} {resp.text}")
         return False
     except Exception as e:
-        print(f"âŒ Wiki create error: {e}")
+        print(f"❌ Wiki create error: {e}")
         return False
 
 
@@ -1239,7 +1236,7 @@ async def _wiki_update(user_id: int, title: str, content: str, append: bool = Fa
             return True
         return False
     except Exception as e:
-        print(f"âŒ Wiki update error: {e}")
+        print(f"❌ Wiki update error: {e}")
         return False
 
 
@@ -1261,7 +1258,7 @@ async def _wiki_delete(user_id: int, title: str) -> bool:
             return True
         return False
     except Exception as e:
-        print(f"âŒ Wiki delete error: {e}")
+        print(f"❌ Wiki delete error: {e}")
         return False
 
 
@@ -1283,7 +1280,7 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
 
     if parsed.get("needs_clarification"):
         question = parsed.get("clarification_question", "Could you clarify your wiki command?")
-        await update.message.reply_text(f"ðŸ¤” {question}")
+        await update.message.reply_text(f"🤔 {question}")
         return
 
     op = parsed.get("operation")
@@ -1295,34 +1292,34 @@ async def handle_wiki(update: Update, user_message: str, user_id: int):
         # Check if page already exists
         existing = await _wiki_get_page(user_id, _slugify(title))
         if existing:
-            await update.message.reply_text(f"âš ï¸ Page *{title}* already exists. Use 'wiki update' to edit it.", parse_mode="Markdown")
+            await update.message.reply_text(f"⚠️ Page *{title}* already exists. Use 'wiki update' to edit it.", parse_mode="Markdown")
             return
         success = await _wiki_create(user_id, title, content)
         if success:
-            await update.message.reply_text(f"ðŸ“ Created wiki page: *{title}*", parse_mode="Markdown")
+            await update.message.reply_text(f"📝 Created wiki page: *{title}*", parse_mode="Markdown")
         else:
-            await update.message.reply_text("âŒ Failed to create wiki page.")
+            await update.message.reply_text("❌ Failed to create wiki page.")
 
     elif op == "update":
         success = await _wiki_update(user_id, title, content, append)
         if success:
             action_word = "Updated" if not append else "Appended to"
-            await update.message.reply_text(f"ðŸ“ {action_word} wiki page: *{title}*", parse_mode="Markdown")
+            await update.message.reply_text(f"📝 {action_word} wiki page: *{title}*", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"âŒ Page *{title}* not found.", parse_mode="Markdown")
+            await update.message.reply_text(f"❌ Page *{title}* not found.", parse_mode="Markdown")
 
     elif op == "delete":
         if _slugify(title) == "main":
-            await update.message.reply_text("âš ï¸ Can't delete the Main page!")
+            await update.message.reply_text("⚠️ Can't delete the Main page!")
             return
         success = await _wiki_delete(user_id, title)
         if success:
-            await update.message.reply_text(f"ðŸ—‘ï¸ Deleted wiki page: *{title}*", parse_mode="Markdown")
+            await update.message.reply_text(f"🗑️ Deleted wiki page: *{title}*", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"âŒ Page *{title}* not found.", parse_mode="Markdown")
+            await update.message.reply_text(f"❌ Page *{title}* not found.", parse_mode="Markdown")
 
     else:
-        await update.message.reply_text("ðŸ¤” I didn't understand that wiki command. Try: wiki create/update/delete [title]")
+        await update.message.reply_text("🤔 I didn't understand that wiki command. Try: wiki create/update/delete [title]")
 
 
 # ---------------------------------------------------------------------------
@@ -1348,7 +1345,7 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
             )
 
         if resp.status_code != 200:
-            print(f"âš ï¸ Reminder check failed: {resp.status_code}")
+            print(f"⚠️ Reminder check failed: {resp.status_code}")
             return
 
         rows = resp.json()
@@ -1373,17 +1370,17 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
             if reminder_time > now_utc:
                 continue
 
-            # It's due â€” send the reminder
+            # It's due — send the reminder
             user_id = row["user_id"]
             task = data.get("task", "Something")
             due = data.get("due", "")
 
             reminder_text = (
-                f"ðŸ”” *Reminder!*\n\n"
+                f"🔔 *Reminder!*\n\n"
                 f"{task}"
             )
             if due:
-                reminder_text += f"\nðŸ“… Due: {due}"
+                reminder_text += f"\n📅 Due: {due}"
 
             try:
                 await context.bot.send_message(
@@ -1391,9 +1388,9 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                     text=reminder_text,
                     parse_mode="Markdown",
                 )
-                print(f"âœ… Sent reminder to {user_id}: {task}")
+                print(f"✅ Sent reminder to {user_id}: {task}")
             except Exception as e:
-                print(f"âŒ Failed to send reminder to {user_id}: {e}")
+                print(f"❌ Failed to send reminder to {user_id}: {e}")
                 continue
 
             # Mark as reminded so we don't send again
@@ -1412,10 +1409,10 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                         json={"data": json.dumps(data)},
                     )
             except Exception as e:
-                print(f"âš ï¸ Failed to mark reminded: {e}")
+                print(f"⚠️ Failed to mark reminded: {e}")
 
     except Exception as e:
-        print(f"âŒ Reminder check error: {e}")
+        print(f"❌ Reminder check error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1435,8 +1432,8 @@ def main():
     # Schedule reminder checker every 60 seconds
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
 
-    print("ðŸ¤– Dashboard bot is running...")
-    print("â° Reminder checker active (every 60s)")
+    print("🤖 Dashboard bot is running...")
+    print("⏰ Reminder checker active (every 60s)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
