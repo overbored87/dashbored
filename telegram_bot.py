@@ -86,7 +86,7 @@ CATEGORIES (pick exactly one):
 1. **finance** — any mention of spending, bills, subscriptions, purchases.
    For action "add":
      Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
-     subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
+     subcategory: must be one of these exact values: "coffee", "eating_out", "groceries", "shopping", "travel", "dates", "house", "family", "other". Map the user's description to the closest one (e.g. restaurant → eating_out, cafe → coffee, flight → travel, furniture → house, gift for family → family).
    For action "remove":
      Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
 
