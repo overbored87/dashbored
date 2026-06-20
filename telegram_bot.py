@@ -83,7 +83,7 @@ ACTIONS:
 
 CATEGORIES (pick exactly one):
 
-1. **finance** — any mention of spending, bills, subscriptions, purchases.
+1. **spending** — any mention of spending, bills, subscriptions, purchases.
    For action "add":
      Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
      subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
@@ -95,14 +95,7 @@ CATEGORIES (pick exactly one):
    Required: at least one of savings (number) or trading (number). Include both if the user provides both.
    Optional: date (YYYY-MM-DD, default today)
 
-3. **dating** — matches, dates, follow-ups, rejections, relationship status updates.
-   For action "add":
-     Required: person (title case), status ("active" | "texting" | "backburner")
-     Optional: platform, activity, location, notes, date (YYYY-MM-DD), rating (1-5)
-   For action "remove":
-     Required: person (the name to remove)
-
-4. **todos** — tasks, reminders, goals, deadlines.
+3. **todos** — tasks, reminders, goals, deadlines.
    For action "add":
      Required: task (concise description), priority ("high" | "medium" | "low"), status ("pending" | "in_progress" | "done")
      Optional: due (YYYY-MM-DD), tags (list of strings), reminder_time (ISO 8601 with timezone, e.g. "2026-02-15T15:00:00+08:00")
@@ -110,7 +103,7 @@ CATEGORIES (pick exactly one):
    Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
    Always use timezone offset +08:00 (Singapore Time).
 
-5. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
+4. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
    Action is always "add" (each message logs one occurrence).
    Required: habit ("apps" | "vlogs" | "pm")
    Optional: date (YYYY-MM-DD, default today), notes (string)
@@ -119,7 +112,7 @@ CATEGORIES (pick exactly one):
    - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
    - "PM", "pm" → habit: "pm"
 
-6. **sleep** — daily sleep quality score with optional notes.
+5. **sleep** — daily sleep quality score with optional notes.
    Action is always "add".
    Required: score (number 0-10, supports decimals like 7.5)
    Optional: date (YYYY-MM-DD, default today), notes (string — brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
@@ -141,7 +134,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "sleep" | "unknown",
+  "category": "spending" | "net_worth" | "todos" | "habits" | "sleep" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -157,9 +150,8 @@ Now parse this message:
 # Validation schemas — enforce required fields per category
 # ---------------------------------------------------------------------------
 REQUIRED_FIELDS = {
-    "finance": {"amount", "description", "subcategory"},
+    "spending": {"amount", "description", "subcategory"},
     "net_worth": set(),     # at least one of savings/trading, validated below
-    "dating": {"person", "status"},
     "todos": {"task", "priority", "status"},
     "habits": {"habit"},
     "sleep": {"score"},
@@ -167,18 +159,14 @@ REQUIRED_FIELDS = {
 
 # For remove actions, we only need enough to identify the entry
 REQUIRED_FIELDS_REMOVE = {
-    "finance": set(),       # any combination of amount/description/date is fine
+    "spending": set(),       # any combination of amount/description/date is fine
     "net_worth": set(),
-    "dating": {"person"},   # must know who to remove
     "todos": set(),
     "habits": set(),
     "sleep": set(),
 }
 
 VALID_ENUMS = {
-    "dating": {
-        "status": {"active", "texting", "backburner"},
-    },
     "todos": {
         "priority": {"high", "medium", "low"},
         "status": {"pending", "in_progress", "done"},
@@ -210,8 +198,8 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
             if value and value not in allowed:
                 return False, f"Invalid {field}='{value}' for {category}. Allowed: {allowed}"
 
-        # Finance-specific: amount must be a positive number
-        if category == "finance":
+        # Spending: amount must be a positive number
+        if category == "spending":
             amount = data.get("amount")
             if not isinstance(amount, (int, float)) or amount <= 0:
                 return False, f"Invalid amount: {amount}"
@@ -309,13 +297,10 @@ def _apply_defaults(parsed: dict):
     data = parsed.get("data", {})
     today = datetime.now().strftime("%Y-%m-%d")
 
-    if parsed["category"] == "finance":
+    if parsed["category"] == "spending":
         data.setdefault("date", today)
 
     elif parsed["category"] == "net_worth":
-        data.setdefault("date", today)
-
-    elif parsed["category"] == "dating":
         data.setdefault("date", today)
 
     elif parsed["category"] == "todos":
@@ -424,7 +409,7 @@ def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | No
         row_data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
         score = 0
 
-        if category == "finance":
+        if category == "spending":
             if search.get("amount") and row_data.get("amount") == search["amount"]:
                 score += 3
             if search.get("description") and search["description"].lower() in row_data.get("description", "").lower():
@@ -433,10 +418,6 @@ def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | No
                 score += 1
             if search.get("date") and row_data.get("date") == search["date"]:
                 score += 1
-
-        elif category == "dating":
-            if search.get("person") and search["person"].lower() == row_data.get("person", "").lower():
-                score += 5  # Name is the primary key for dating
 
         if score > best_score:
             best_score = score
@@ -674,7 +655,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+        emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "habits": "🔁", "sleep": "😴"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -711,27 +692,23 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         rows = resp.json()
-        finance_count = 0
+        spending_count = 0
         total_spent = 0.0
-        dating_count = 0
         todos_pending = 0
 
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
-            if cat == "finance":
-                finance_count += 1
+            if cat == "spending":
+                spending_count += 1
                 total_spent += data.get("amount", 0)
-            elif cat == "dating":
-                dating_count += 1
             elif cat == "todos":
                 if data.get("status") in ("pending", "in_progress"):
                     todos_pending += 1
 
         await update.message.reply_text(
             f"📊 *Your Stats*\n\n"
-            f"💰 Finance: {finance_count} entries · ${total_spent:,.2f} spent\n"
-            f"💕 Dating: {dating_count} entries\n"
+            f"💰 Spending: {spending_count} entries · ${total_spent:,.2f} spent\n"
             f"✅ Todos: {todos_pending} pending tasks",
             parse_mode="Markdown",
         )
@@ -934,7 +911,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+    emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "habits": "🔁", "sleep": "😴"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -962,7 +939,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 def _summarise_entry(category: str, data: dict) -> str:
     """Human-readable one-liner for a dashboard entry."""
-    if category == "finance":
+    if category == "spending":
         amt = data.get("amount", 0)
         desc = data.get("description", "")
         subcat = data.get("subcategory", "")
@@ -980,17 +957,6 @@ def _summarise_entry(category: str, data: dict) -> str:
         total = data.get("savings", 0) + data.get("trading", 0)
         parts.append(f"Total: *${total:,.0f}*")
         return " · ".join(parts)
-
-    elif category == "dating":
-        person = data.get("person", "someone")
-        status = data.get("status", "")
-        notes = data.get("notes", "")
-        status_icons = {"active": "🟢", "texting": "💬", "backburner": "⏸️"}
-        icon = status_icons.get(status, "💕")
-        line = f"{icon} *{person}* — {status}"
-        if notes:
-            line += f" ({notes})"
-        return line
 
     elif category == "todos":
         task = data.get("task", "untitled task")
