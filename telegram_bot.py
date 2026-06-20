@@ -71,24 +71,6 @@ CATEGORIES (pick exactly one):
    Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
    Always use timezone offset +08:00 (Singapore Time).
 
-5. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
-   Action is always "add" (each message logs one occurrence).
-   Required: habit ("apps" | "vlogs" | "pm")
-   Optional: date (YYYY-MM-DD, default today), notes (string)
-   Trigger examples:
-   - "coded an app", "shipped an app", "launched a new app", "built an app" → habit: "apps"
-   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
-   - "PM", "pm" → habit: "pm"
-
-6. **sleep** — daily sleep quality score with optional notes.
-   Action is always "add".
-   Required: score (number 0-10, supports decimals like 7.5)
-   Optional: date (YYYY-MM-DD, default today), notes (string — brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
-   Trigger examples:
-   - "sleep 7.5" → score: 7.5
-   - "sleep 6/10 alcohol, slept late" → score: 6, notes: "alcohol, slept late"
-   - "last night 8/10 melatonin" → score: 8, notes: "melatonin"
-
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
@@ -102,7 +84,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "finance" | "net_worth" | "dating" | "todos" | "habits" | "sleep" | "unknown",
+  "category": "finance" | "net_worth" | "dating" | "todos" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -122,8 +104,6 @@ REQUIRED_FIELDS = {
     "net_worth": set(),     # at least one of savings/trading, validated below
     "dating": {"person", "status"},
     "todos": {"task", "priority", "status"},
-    "habits": {"habit"},
-    "sleep": {"score"},
 }
 
 # For remove actions, we only need enough to identify the entry
@@ -132,8 +112,6 @@ REQUIRED_FIELDS_REMOVE = {
     "net_worth": set(),
     "dating": {"person"},   # must know who to remove
     "todos": set(),
-    "habits": set(),
-    "sleep": set(),
 }
 
 VALID_ENUMS = {
@@ -143,9 +121,6 @@ VALID_ENUMS = {
     "todos": {
         "priority": {"high", "medium", "low"},
         "status": {"pending", "in_progress", "done"},
-    },
-    "habits": {
-        "habit": {"apps", "vlogs", "pm"},
     },
 }
 
@@ -183,12 +158,6 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
             has_trading = isinstance(data.get("trading"), (int, float))
             if not has_savings and not has_trading:
                 return False, "net_worth requires at least one of: savings, trading"
-
-        # Sleep: score must be 0-10
-        if category == "sleep":
-            score = data.get("score")
-            if not isinstance(score, (int, float)) or score < 0 or score > 10:
-                return False, f"Invalid sleep score: {score} (must be 0-10)"
 
     return True, ""
 
@@ -283,11 +252,7 @@ def _apply_defaults(parsed: dict):
         data.setdefault("status", "pending")
         data.setdefault("tags", [])
 
-    elif parsed["category"] == "habits":
-        data.setdefault("date", today)
 
-    elif parsed["category"] == "sleep":
-        data.setdefault("date", today)
 
 
 # ---------------------------------------------------------------------------
@@ -407,167 +372,6 @@ def _find_best_match(category: str, search: dict, rows: list[dict]) -> dict | No
 
 
 # ---------------------------------------------------------------------------
-# Prospect helpers
-# ---------------------------------------------------------------------------
-async def find_prospect(user_id: int, name: str) -> dict | None:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{DATABASE_URL}/rest/v1/prospects",
-                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
-                params={"user_id": f"eq.{user_id}", "name": f"ilike.{name}", "archived": "eq.false"},
-            )
-        rows = resp.json() if resp.status_code == 200 else []
-        return rows[0] if rows else None
-    except Exception as e:
-        print(f"❌ find_prospect error: {e}")
-        return None
-
-
-async def create_prospect(user_id: int, name: str, stage: str, notes: str | None, rating: float | None) -> bool:
-    row = {
-        "user_id": str(user_id),
-        "name": name,
-        "stage": stage,
-        "notes": notes,
-        "rating": rating,
-        "logs": [],
-        "archived": False,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{DATABASE_URL}/rest/v1/prospects",
-                headers={
-                    "apikey": DATABASE_KEY,
-                    "Authorization": f"Bearer {DATABASE_KEY}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=minimal",
-                },
-                json=row,
-            )
-        return resp.status_code in (200, 201)
-    except Exception as e:
-        print(f"❌ create_prospect error: {e}")
-        return False
-
-
-async def update_prospect_notes(user_id: int, prospect_id: str, notes: str, rating: float | None) -> bool:
-    update = {"notes": notes, "updated_at": datetime.now(timezone.utc).isoformat()}
-    if rating is not None:
-        update["rating"] = rating
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.patch(
-                f"{DATABASE_URL}/rest/v1/prospects",
-                headers={
-                    "apikey": DATABASE_KEY,
-                    "Authorization": f"Bearer {DATABASE_KEY}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=minimal",
-                },
-                params={"id": f"eq.{prospect_id}"},
-                json=update,
-            )
-        return resp.status_code in (200, 204)
-    except Exception as e:
-        print(f"❌ update_prospect_notes error: {e}")
-        return False
-
-
-async def analyze_conversation_screenshot(image_b64: str, prospect_name: str) -> dict:
-    prompt = f"""You are analyzing a dating app / messaging conversation between the user and {prospect_name}.
-
-IMPORTANT: Text bubbles on the RIGHT side of the screen are sent by the USER. Text bubbles on the LEFT side are sent by {prospect_name}. Do not mix these up.
-
-Assess {prospect_name}'s messages for vibe, engagement, and interest level. The user's messages provide context only.
-
-Return ONLY a valid JSON object, no markdown:
-{{
-  "notes": "Vibe: <one line>\\nInterests: <comma-separated or — if unclear>\\nGreen flags: <one line or —>\\nRed flags: <one line or —>\\nNext move: <one line>",
-  "rating": <number 0.5-5 in 0.5 increments>,
-  "rating_reason": "<one line>"
-}}
-
-Rating guide (based on HER messages only):
-1.0-1.5 = barely engaged, very short replies
-2.0-2.5 = polite but passive
-3.0-3.5 = decent engagement, some warmth
-4.0-4.5 = high engagement, asks questions, enthusiasm
-5.0 = exceptional, initiates topics, suggests meetups"""
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 1024,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
-            },
-        )
-
-    if resp.status_code != 200:
-        raise Exception(f"Claude API {resp.status_code}: {resp.text}")
-
-    text = resp.json()["content"][0]["text"].strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
-
-
-async def _process_conversation_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE, image_b64: str, name: str, user_id: int):
-    await update.message.chat.send_action("typing")
-
-    prospect = await find_prospect(user_id, name)
-
-    try:
-        result = await analyze_conversation_screenshot(image_b64, name)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Analysis failed: {e}")
-        return
-
-    rating = result.get("rating")
-    rating_str = f"\n⭐ *{rating}/5* — {result.get('rating_reason', '')}" if rating else ""
-    preview = f"📊 *Analysis for {name}*\n\n{result['notes']}{rating_str}"
-
-    if not prospect:
-        context.user_data["pending_create"] = {
-            "name": name,
-            "notes": result["notes"],
-            "rating": rating,
-        }
-        await update.message.reply_text(
-            f"{preview}\n\n*{name}* isn't in your pipeline yet. What stage is she?\n`texting` · `first_date` · `seeing` · `back_burner`\n\nReply with the stage to create her, or *no* to discard.",
-            parse_mode="Markdown",
-        )
-        return
-
-    context.user_data["pending_analysis"] = {
-        "prospect_id": prospect["id"],
-        "prospect_name": prospect["name"],
-        "notes": result["notes"],
-        "rating": rating,
-        "rating_reason": result.get("rating_reason"),
-    }
-
-    await update.message.reply_text(
-        f"{preview}\n\nApply to notes? Reply *yes* to save or *no* to discard.",
-        parse_mode="Markdown",
-    )
-
-
-# ---------------------------------------------------------------------------
 # Telegram handlers
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -635,7 +439,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+        emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -764,123 +568,11 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Something went wrong.")
 
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages — conversation screenshot analysis."""
-    user_id = update.message.from_user.id
-    caption = (update.message.caption or "").strip()
-
-    await update.message.chat.send_action("typing")
-
-    # Download the largest photo size
-    photo = update.message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
-    photo_bytes = await file.download_as_bytearray()
-    image_b64 = base64.b64encode(photo_bytes).decode()
-
-    if caption:
-        await _process_conversation_screenshot(update, context, image_b64, caption, user_id)
-    else:
-        context.user_data["pending_photo"] = {"b64": image_b64}
-        await update.message.reply_text("📸 Got it. Who is this conversation with? (reply with her name)")
-
-
-async def toggle_demo_mode(update: Update, user_id: int):
-    """Toggle demo mode on/off."""
-    try:
-        # Check current state
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
-                headers={"apikey": DATABASE_KEY, "Authorization": f"Bearer {DATABASE_KEY}"},
-                params={
-                    "user_id": f"eq.{user_id}",
-                    "category": "eq.settings",
-                    "select": "id,data",
-                },
-            )
-        rows = resp.json() if resp.status_code == 200 else []
-        settings_row = rows[0] if rows else None
-
-        if settings_row:
-            data = settings_row["data"] if isinstance(settings_row["data"], dict) else json.loads(settings_row["data"])
-            new_demo = not data.get("demo_mode", False)
-            data["demo_mode"] = new_demo
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.patch(
-                    f"{DATABASE_URL}/rest/v1/{TABLE_NAME}",
-                    headers={
-                        "apikey": DATABASE_KEY,
-                        "Authorization": f"Bearer {DATABASE_KEY}",
-                        "Content-Type": "application/json",
-                        "Prefer": "return=minimal",
-                    },
-                    params={"id": f"eq.{settings_row['id']}"},
-                    json={"data": json.dumps(data)},
-                )
-        else:
-            new_demo = True
-            await save_to_supabase("settings", {"demo_mode": True}, user_id)
-
-        if new_demo:
-            await update.message.reply_text("🎭 Demo mode *ON*\nNet worth redacted · Dating hidden", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("🎭 Demo mode *OFF*\nAll data visible", parse_mode="Markdown")
-
-    except Exception as e:
-        print(f"❌ Demo toggle error: {e}")
-        await update.message.reply_text("❌ Failed to toggle demo mode.")
-
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any text message — parse and store or remove."""
     user_message = update.message.text.strip()
     user_id = update.message.from_user.id
 
-    # Pending photo: waiting for prospect name
-    if "pending_photo" in context.user_data:
-        photo_data = context.user_data.pop("pending_photo")
-        await _process_conversation_screenshot(update, context, photo_data["b64"], user_message, user_id)
-        return
-
-    # Pending analysis: waiting for yes/no confirmation
-    if "pending_analysis" in context.user_data:
-        if user_message.lower() in ("yes", "y", "apply", "ok", "yep", "yeah", "sure"):
-            pa = context.user_data.pop("pending_analysis")
-            success = await update_prospect_notes(user_id, pa["prospect_id"], pa["notes"], pa.get("rating"))
-            if success:
-                await update.message.reply_text(f"✅ Notes updated for *{pa['prospect_name']}*", parse_mode="Markdown")
-            else:
-                await update.message.reply_text("❌ Failed to save. Try again.")
-            return
-        elif user_message.lower() in ("no", "n", "nope", "discard", "cancel"):
-            context.user_data.pop("pending_analysis")
-            await update.message.reply_text("🗑️ Discarded.")
-            return
-
-    # Pending create: waiting for stage selection
-    VALID_STAGES = {"texting", "first_date", "seeing", "back_burner"}
-    if "pending_create" in context.user_data:
-        if user_message.lower() in ("no", "n", "cancel", "discard"):
-            context.user_data.pop("pending_create")
-            await update.message.reply_text("🗑️ Discarded.")
-            return
-        stage = user_message.lower().strip().replace(" ", "_")
-        if stage not in VALID_STAGES:
-            await update.message.reply_text(
-                f"Please reply with one of: `texting` · `first_date` · `seeing` · `back_burner`",
-                parse_mode="Markdown",
-            )
-            return
-        pc = context.user_data.pop("pending_create")
-        success = await create_prospect(user_id, pc["name"], stage, pc.get("notes"), pc.get("rating"))
-        if success:
-            await update.message.reply_text(
-                f"✅ *{pc['name']}* added to your pipeline ({stage}) with notes from the analysis.",
-                parse_mode="Markdown",
-            )
-        else:
-            await update.message.reply_text("❌ Failed to create prospect. Try again.")
-        return
 
     # Check for demo toggle
     if user_message.strip().lower() == 'demo':
@@ -903,7 +595,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+    emoji_map = {"finance": "💰", "net_worth": "🏦", "dating": "💕", "todos": "✅"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -979,13 +671,9 @@ def _summarise_entry(category: str, data: dict) -> str:
                 pass
         return line
 
-    elif category == "habits":
-        habit = data.get("habit", "")
         habit_labels = {"apps": "🚀 App shipped!", "vlogs": "🎬 Vlog shot!", "pm": "🚬 PM logged"}
         return habit_labels.get(habit, f"Habit: {habit}")
 
-    elif category == "sleep":
-        score = data.get("score", 0)
         notes = data.get("notes", "")
         line = f"*{score}/10*"
         if notes:
@@ -1099,7 +787,6 @@ def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("recent", cmd_recent))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Schedule reminder checker every 60 seconds
