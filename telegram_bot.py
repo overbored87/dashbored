@@ -86,7 +86,7 @@ CATEGORIES (pick exactly one):
 1. **spending** — any mention of spending, bills, subscriptions, purchases.
    For action "add":
      Required: amount (positive number), description (short label), subcategory, date (YYYY-MM-DD, default today)
-     subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out". Invent new ones naturally as needed.
+     subcategory: lowercase snake_case label. Reuse when possible. Examples: "food", "transport", "rent", "entertainment", "shopping", "health", "utilities", "subscription", "groceries", "coffee", "dining_out", "api_costs". Invent new ones naturally as needed.
    For action "remove":
      Provide as many identifying fields as possible: amount, description, subcategory, date — whatever the user mentions.
 
@@ -615,8 +615,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📖 *How to use this bot*\n\n"
         "Just type naturally — I'll figure out the category.\n\n"
         "Tips:\n"
-        "• Include dollar amounts for finance entries\n"
-        "• Mention people's names for dating entries\n"
+        "• Include dollar amounts for spending entries\n"
         "• Use words like 'need to', 'should', 'by Friday' for todos\n\n"
         "Commands:\n"
         "/stats — quick summary of your data\n"
