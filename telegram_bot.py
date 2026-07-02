@@ -32,6 +32,12 @@ TABLE_NAME = os.environ.get("DATABASE_TABLE", "dashboard_entries")
 LOCAL_TZ = ZoneInfo("Asia/Singapore")                # SGT UTC+8
 WIKI_TABLE = "wiki_pages"
 
+ALLOWED_USERS = {268934826, 7738099781}
+
+
+def allowed(update: Update) -> bool:
+    return update.message.from_user.id in ALLOWED_USERS
+
 # ---------------------------------------------------------------------------
 # Wiki parsing prompt
 # ---------------------------------------------------------------------------
@@ -591,6 +597,8 @@ async def _process_conversation_screenshot(update: Update, context: ContextTypes
 # Telegram handlers
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
     await update.message.reply_text(
         "👋 *Welcome to your Personal Dashboard Bot!*\n\n"
         "Just send me messages naturally and I'll log them:\n\n"
@@ -611,6 +619,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
     await update.message.reply_text(
         "📖 *How to use this bot*\n\n"
         "Just type naturally — I'll figure out the category.\n\n"
@@ -627,6 +637,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetch last 5 entries from Supabase."""
+    if not allowed(update):
+        return
     user_id = str(update.message.from_user.id)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -671,6 +683,8 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show aggregated stats from Supabase."""
+    if not allowed(update):
+        return
     user_id = str(update.message.from_user.id)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -719,6 +733,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete the most recent entry."""
+    if not allowed(update):
+        return
     user_id = str(update.message.from_user.id)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -768,6 +784,8 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages — conversation screenshot analysis."""
+    if not allowed(update):
+        return
     user_id = update.message.from_user.id
     caption = (update.message.caption or "").strip()
 
@@ -835,6 +853,8 @@ async def toggle_demo_mode(update: Update, user_id: int):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any text message — parse and store or remove."""
+    if not allowed(update):
+        return
     user_message = update.message.text.strip()
     user_id = update.message.from_user.id
 
