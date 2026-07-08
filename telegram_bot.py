@@ -328,7 +328,7 @@ async def save_to_supabase(category: str, data: dict, user_id: int) -> bool:
     row = {
         "user_id": str(user_id),
         "category": category,
-        "data": json.dumps(data),       # JSONB column — store as string for the REST API
+        "data": data,       # jsonb column: store the native object (PostgREST encodes it)
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -835,7 +835,7 @@ async def toggle_demo_mode(update: Update, user_id: int):
                         "Prefer": "return=minimal",
                     },
                     params={"id": f"eq.{settings_row['id']}"},
-                    json={"data": json.dumps(data)},
+                    json={"data": data},
                 )
         else:
             new_demo = True
@@ -1391,7 +1391,7 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                             "Prefer": "return=minimal",
                         },
                         params={"id": f"eq.{row['id']}"},
-                        json={"data": json.dumps(data)},
+                        json={"data": data},
                     )
             except Exception as e:
                 print(f"⚠️ Failed to mark reminded: {e}")
