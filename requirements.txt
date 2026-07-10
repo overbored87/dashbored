@@ -1,3 +1,7 @@
-# requirements.txt for Dashboard Telegram Bot
+# requirements.txt for the Dashboard Telegram bot AND the Siren sidecar
+# (both build from this repo; the sidecar service overrides the start command).
 python-telegram-bot[job-queue]>=20.0
 httpx>=0.24.0
+# sidecar.py only:
+fastapi>=0.110
+uvicorn[standard]>=0.29
