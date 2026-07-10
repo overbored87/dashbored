@@ -1,0 +1,10 @@
+# Railway config for the SIREN SIDECAR service (sidecar.py), which lives in the
+# same repo as the Telegram bot. The bot service uses railway.toml (python
+# telegram_bot.py); this sidecar service must point its "Railway Config File"
+# setting at THIS file so it boots uvicorn instead of the bot.
+#
+# Needed because a startCommand in a Railway config file overrides the
+# dashboard's Custom Start Command — so the two services can't share one config.
+[deploy]
+startCommand = "uvicorn sidecar:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
