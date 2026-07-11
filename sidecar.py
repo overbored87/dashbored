@@ -173,20 +173,20 @@ def invoke(body: dict, x_siren_key: str = Header(default="")):
 
         # --- spending ---------------------------------------------------------
         if tool == "log_spending":
-            amount, description, subcategory = (
-                args.get("amount"),
-                args.get("description"),
-                args.get("subcategory"),
-            )
-            if amount is None or not description or not subcategory:
+            amount, description = args.get("amount"), args.get("description")
+            if amount is None or not description:
                 raise HTTPException(
                     status_code=400,
-                    detail="log_spending needs 'amount', 'description', 'subcategory'",
+                    detail="log_spending needs 'amount' and 'description'",
                 )
+            # subcategory is optional: a spend logged conversationally ("a $12
+            # coffee") often has no explicit bucket, and rejecting it would drop
+            # the spend entirely. Default to "other" — the dashboard already
+            # falls back to the description for the label.
             data = {
                 "amount": amount,
                 "description": description,
-                "subcategory": subcategory,
+                "subcategory": args.get("subcategory") or "other",
                 "date": args.get("date") or _today(),
             }
             row = _insert("spending", data)
