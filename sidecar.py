@@ -208,6 +208,34 @@ def invoke(body: dict, x_siren_key: str = Header(default="")):
             row = _insert("net_worth", data)
             return {"result": {"ok": True, "id": row.get("id")}}
 
+        # --- remove any entry --------------------------------------------------
+        if tool == "remove_entry":
+            row_id = args.get("id")
+            if not row_id:
+                raise HTTPException(
+                    status_code=400, detail="remove_entry needs 'id' (from query_dashboard)"
+                )
+            # Delete scoped to this user, and return what was removed so Siren
+            # can confirm it by name. The user_id filter doubles as the
+            # ownership guard — a foreign row simply matches nothing.
+            resp = _http.delete(
+                f"/{DATABASE_TABLE}",
+                params={"id": f"eq.{row_id}", "user_id": f"eq.{USER_ID}"},
+                headers={"Prefer": "return=representation"},
+            )
+            resp.raise_for_status()
+            removed = resp.json()
+            if not removed:
+                return {"result": {"ok": False, "error": f"no entry with id {row_id}"}}
+            return {
+                "result": {
+                    "ok": True,
+                    "id": row_id,
+                    "category": removed[0].get("category"),
+                    "data": removed[0].get("data"),
+                }
+            }
+
         raise HTTPException(status_code=400, detail=f"unknown tool: {tool}")
     except httpx.HTTPStatusError as e:
         raise HTTPException(
