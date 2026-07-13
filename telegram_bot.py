@@ -109,16 +109,7 @@ CATEGORIES (pick exactly one):
    Interpret relative times based on current datetime. "morning" = 09:00, "afternoon" = 14:00, "evening" = 19:00, "tonight" = 20:00.
    Always use timezone offset +08:00 (Singapore Time).
 
-4. **habits** — tracking recurring habits: apps coded, vlogs shot, or PM.
-   Action is always "add" (each message logs one occurrence).
-   Required: habit ("apps" | "vlogs" | "pm")
-   Optional: date (YYYY-MM-DD, default today), notes (string)
-   Trigger examples:
-   - "coded an app", "shipped an app", "launched a new app", "built an app" → habit: "apps"
-   - "shot a vlog", "filmed a vlog", "made a vlog", "recorded a vlog" → habit: "vlogs"
-   - "PM", "pm" → habit: "pm"
-
-5. **sleep** — daily sleep quality score with optional notes.
+4. **sleep** — daily sleep quality score with optional notes.
    Action is always "add".
    Required: score (number 0-10, supports decimals like 7.5)
    Optional: date (YYYY-MM-DD, default today), notes (string — brief context like "alcohol", "melatonin", "slept at 2am", "work stress", "woke up in the middle of the night")
@@ -140,7 +131,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "spending" | "net_worth" | "todos" | "habits" | "sleep" | "unknown",
+  "category": "spending" | "net_worth" | "todos" | "sleep" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -159,7 +150,6 @@ REQUIRED_FIELDS = {
     "spending": {"amount", "description", "subcategory"},
     "net_worth": set(),     # at least one of savings/trading, validated below
     "todos": {"task", "priority", "status"},
-    "habits": {"habit"},
     "sleep": {"score"},
 }
 
@@ -168,7 +158,6 @@ REQUIRED_FIELDS_REMOVE = {
     "spending": set(),       # any combination of amount/description/date is fine
     "net_worth": set(),
     "todos": set(),
-    "habits": set(),
     "sleep": set(),
 }
 
@@ -176,9 +165,6 @@ VALID_ENUMS = {
     "todos": {
         "priority": {"high", "medium", "low"},
         "status": {"pending", "in_progress", "done"},
-    },
-    "habits": {
-        "habit": {"apps", "vlogs", "pm"},
     },
 }
 
@@ -312,9 +298,6 @@ def _apply_defaults(parsed: dict):
     elif parsed["category"] == "todos":
         data.setdefault("status", "pending")
         data.setdefault("tags", [])
-
-    elif parsed["category"] == "habits":
-        data.setdefault("date", today)
 
     elif parsed["category"] == "sleep":
         data.setdefault("date", today)
@@ -666,7 +649,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+        emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -930,7 +913,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "habits": "🔁", "sleep": "😴"}
+    emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -994,11 +977,6 @@ def _summarise_entry(category: str, data: dict) -> str:
             except (ValueError, TypeError):
                 pass
         return line
-
-    elif category == "habits":
-        habit = data.get("habit", "")
-        habit_labels = {"apps": "🚀 App shipped!", "vlogs": "🎬 Vlog shot!", "pm": "🚬 PM logged"}
-        return habit_labels.get(habit, f"Habit: {habit}")
 
     elif category == "sleep":
         score = data.get("score", 0)
