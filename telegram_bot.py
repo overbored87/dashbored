@@ -118,6 +118,25 @@ CATEGORIES (pick exactly one):
    - "sleep 6/10 alcohol, slept late" → score: 6, notes: "alcohol, slept late"
    - "last night 8/10 melatonin" → score: 8, notes: "melatonin"
 
+5. **leave** — work leave: either stating a balance/entitlement, or logging leave taken.
+   Action is always "add".
+   Required: kind ("balance" | "taken"), days (number, supports halves like 0.5)
+   Optional: date (YYYY-MM-DD, default today), end_date (YYYY-MM-DD, last day of a multi-day range),
+             leave_type ("annual" | "sick" | "childcare" | "unpaid" | "other", default "annual"), notes (string)
+   Use kind "balance" when the user states remaining days or a yearly entitlement — this becomes the
+   new baseline the dashboard counts down from. Set date to when it applies (default today; for a
+   yearly entitlement use 1 Jan of that year).
+   Use kind "taken" when the user logs leave they are taking or have taken (past OR future/booked).
+   For a range, set date = first day, end_date = last day, and days = leave days actually consumed
+   (exclude weekends and public holidays).
+   Trigger examples:
+   - "leave balance 18.5" → kind: "balance", days: 18.5
+   - "annual leave 21 days for 2026" → kind: "balance", days: 21, date: "2026-01-01"
+   - "took leave friday" → kind: "taken", days: 1, leave_type: "annual"
+   - "on leave 15-17 aug" → kind: "taken", days: 3, date: "2026-08-15", end_date: "2026-08-17"
+   - "half day leave tomorrow" → kind: "taken", days: 0.5
+   - "sick leave today" → kind: "taken", days: 1, leave_type: "sick"
+
 RULES:
 - Return ONLY a single JSON object. No markdown, no explanation.
 - Current datetime: {current_datetime} (timezone: Asia/Singapore, UTC+8)
@@ -131,7 +150,7 @@ RULES:
 OUTPUT SCHEMA:
 {{
   "action": "add" | "remove",
-  "category": "spending" | "net_worth" | "todos" | "sleep" | "unknown",
+  "category": "spending" | "net_worth" | "todos" | "sleep" | "leave" | "unknown",
   "data": {{ ... }},
   "confidence": 0.0-1.0,
   "needs_clarification": false,
@@ -151,6 +170,7 @@ REQUIRED_FIELDS = {
     "net_worth": set(),     # at least one of savings/trading, validated below
     "todos": {"task", "priority", "status"},
     "sleep": {"score"},
+    "leave": {"kind", "days"},
 }
 
 # For remove actions, we only need enough to identify the entry
@@ -159,12 +179,17 @@ REQUIRED_FIELDS_REMOVE = {
     "net_worth": set(),
     "todos": set(),
     "sleep": set(),
+    "leave": set(),
 }
 
 VALID_ENUMS = {
     "todos": {
         "priority": {"high", "medium", "low"},
         "status": {"pending", "in_progress", "done"},
+    },
+    "leave": {
+        "kind": {"balance", "taken"},
+        "leave_type": {"annual", "sick", "childcare", "unpaid", "other"},
     },
 }
 
@@ -208,6 +233,14 @@ def validate_parsed(parsed: dict) -> tuple[bool, str]:
             score = data.get("score")
             if not isinstance(score, (int, float)) or score < 0 or score > 10:
                 return False, f"Invalid sleep score: {score} (must be 0-10)"
+
+        # Leave: days must be a non-negative number; taken must be > 0
+        if category == "leave":
+            days = data.get("days")
+            if not isinstance(days, (int, float)) or days < 0:
+                return False, f"Invalid leave days: {days}"
+            if data.get("kind") == "taken" and days == 0:
+                return False, "Leave taken must be more than 0 days"
 
     return True, ""
 
@@ -301,6 +334,11 @@ def _apply_defaults(parsed: dict):
 
     elif parsed["category"] == "sleep":
         data.setdefault("date", today)
+
+    elif parsed["category"] == "leave":
+        data.setdefault("date", today)
+        if data.get("kind") == "taken":
+            data.setdefault("leave_type", "annual")
 
 
 # ---------------------------------------------------------------------------
@@ -609,7 +647,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Just type naturally — I'll figure out the category.\n\n"
         "Tips:\n"
         "• Include dollar amounts for spending entries\n"
-        "• Use words like 'need to', 'should', 'by Friday' for todos\n\n"
+        "• Use words like 'need to', 'should', 'by Friday' for todos\n"
+        "• Leave: _leave balance 18.5_ to set your balance, "
+        "_took leave friday_ or _on leave 15-17 aug_ to log days off\n\n"
         "Commands:\n"
         "/stats — quick summary of your data\n"
         "/recent — last 5 entries\n"
@@ -649,7 +689,7 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lines = ["📋 *Recent entries:*\n"]
-        emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴"}
+        emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴", "leave": "🌴"}
         for row in rows:
             data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
             cat = row["category"]
@@ -913,7 +953,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     confidence = parsed.get("confidence", 0)
     low_conf = confidence < 0.7
 
-    emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴"}
+    emoji_map = {"spending": "💰", "net_worth": "🏦", "todos": "✅", "sleep": "😴", "leave": "🌴"}
     emoji = emoji_map.get(category, "📝")
 
     if action == "remove":
@@ -982,6 +1022,22 @@ def _summarise_entry(category: str, data: dict) -> str:
         score = data.get("score", 0)
         notes = data.get("notes", "")
         line = f"*{score}/10*"
+        if notes:
+            line += f" — {notes}"
+        return line
+
+    elif category == "leave":
+        days = data.get("days", 0)
+        notes = data.get("notes", "")
+        if data.get("kind") == "balance":
+            return f"Balance set to *{days}* days"
+        leave_type = data.get("leave_type", "annual")
+        start = data.get("date", "")
+        end = data.get("end_date")
+        when = f"{start} → {end}" if end and end != start else start
+        line = f"*{days}d* {leave_type} leave"
+        if when:
+            line += f" ({when})"
         if notes:
             line += f" — {notes}"
         return line
